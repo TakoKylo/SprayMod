@@ -353,8 +353,8 @@ namespace SprayMod
                 _scrollView.contentContainer.style.paddingRight = 14;
                 _panel.Add(_scrollView);
                 
-            // Footer row: evenly spread (COFFEE? left, RESET centre, CLOSE right) via flexbox -
-            // no hardcoded pixel margins, which previously left the buttons misaligned.
+            // Footer row: COFFEE? alone on the left; RESET + CLOSE grouped together on the right.
+            // SpaceBetween pushes the two groups apart - no hardcoded pixel margins.
             var buttonRow = new UITK.VisualElement();
             buttonRow.style.flexDirection = UITK.FlexDirection.Row;
             buttonRow.style.justifyContent = UITK.Justify.SpaceBetween;
@@ -369,9 +369,15 @@ namespace SprayMod
                 HideUI();
             });
 
+            // Right-hand group keeps RESET and CLOSE hugging each other on the right.
+            var rightGroup = new UITK.VisualElement();
+            rightGroup.style.flexDirection = UITK.FlexDirection.Row;
+            rightGroup.style.alignItems = UITK.Align.Center;
+            rightGroup.Add(resetBtn);
+            rightGroup.Add(closeBtn);
+
             buttonRow.Add(donateBtn);
-            buttonRow.Add(resetBtn);
-            buttonRow.Add(closeBtn);
+            buttonRow.Add(rightGroup);
             _panel.Add(buttonRow);
                 
                 // Capture overlay - matching DashFall styling
