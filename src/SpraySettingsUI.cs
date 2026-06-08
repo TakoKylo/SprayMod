@@ -353,10 +353,14 @@ namespace SprayMod
                 _scrollView.contentContainer.style.paddingRight = 14;
                 _panel.Add(_scrollView);
                 
-// Button row at bottom - match DashFall styling
+            // Footer row: evenly spread (COFFEE? left, RESET centre, CLOSE right) via flexbox -
+            // no hardcoded pixel margins, which previously left the buttons misaligned.
             var buttonRow = new UITK.VisualElement();
             buttonRow.style.flexDirection = UITK.FlexDirection.Row;
-            
+            buttonRow.style.justifyContent = UITK.Justify.SpaceBetween;
+            buttonRow.style.alignItems = UITK.Align.Center;
+            buttonRow.style.marginTop = 8;
+
             var donateBtn = MakeDonateButton("COFFEE?", () => Application.OpenURL("https://buymeacoffee.com/amikiir"));
             var resetBtn = MakeResetButton("RESET TO DEFAULTS", ResetToDefaults);
             var closeBtn = MakeCloseButton("CLOSE", () =>
@@ -364,11 +368,11 @@ namespace SprayMod
                 SaveConfig();
                 HideUI();
             });
-            
+
             buttonRow.Add(donateBtn);
             buttonRow.Add(resetBtn);
-                buttonRow.Add(closeBtn);
-                _panel.Add(buttonRow);
+            buttonRow.Add(closeBtn);
+            _panel.Add(buttonRow);
                 
                 // Capture overlay - matching DashFall styling
                 _captureOverlay = new UITK.VisualElement { name = "Spray_CaptureOverlay" };
@@ -533,39 +537,45 @@ namespace SprayMod
             {
                 manifest.sprays.Add(new SpraySpec { name = "", url = url });
                 SprayConfigManager.SaveManifest(manifest);
+                if (_addLinkField != null) _addLinkField.value = "";
+                // The rebuilt row auto-shortens long links itself (see BuildSprayRow), with status.
                 ReloadAndRefresh();
-                // A link too long for chat can't be shared as-is - auto re-host it to a short,
-                // permanent URL and save that back into the list.
-                if (!SprayChatSync.UrlFitsInChat(url))
-                    ShortenSprayLink(url);
             }
         }
 
+        // Per-session link-shorten state, keyed by the original (long) URL, so opening the tab or
+        // adding a link auto-shortens once and shows progress/errors without retrying on every refresh.
+        private readonly HashSet<string> _shortenWorking = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, string> _shortenError = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
         /// <summary>
-        /// Re-hosts a too-long library link to a short permanent URL and writes it back into
-        /// sprays.json (matched by its current URL), then reloads. No-op on failure (logged).
+        /// Auto re-hosts a too-long link to a short permanent URL and writes it back into sprays.json
+        /// (matched by its current URL). Runs once per URL per session; result drives the row status.
         /// </summary>
-        private void ShortenSprayLink(string oldUrl)
+        private void EnsureShortened(string longUrl)
         {
+            if (string.IsNullOrEmpty(longUrl)) return;
+            if (_shortenWorking.Contains(longUrl) || _shortenError.ContainsKey(longUrl)) return;
             var mgr = SprayManager.Instance;
-            if (mgr == null || string.IsNullOrEmpty(oldUrl)) return;
-            mgr.ShortenLink(oldUrl, newUrl =>
+            if (mgr == null) return;
+
+            _shortenWorking.Add(longUrl);
+            mgr.ShortenLink(longUrl, (newUrl, error) =>
             {
-                if (string.IsNullOrEmpty(newUrl)) return;
-                var m = SprayConfigManager.LoadManifest();
-                bool changed = false;
-                foreach (var s in m.sprays)
+                _shortenWorking.Remove(longUrl);
+                if (!string.IsNullOrEmpty(newUrl))
                 {
-                    if (s.IsUrl && string.Equals(s.url, oldUrl, StringComparison.OrdinalIgnoreCase))
-                    {
-                        s.url = newUrl;
-                        changed = true;
-                    }
+                    var m = SprayConfigManager.LoadManifest();
+                    bool changed = false;
+                    foreach (var s in m.sprays)
+                        if (s.IsUrl && string.Equals(s.url, longUrl, StringComparison.OrdinalIgnoreCase)) { s.url = newUrl; changed = true; }
+                    if (changed) { SprayConfigManager.SaveManifest(m); ReloadAndRefresh(); }
+                    else if (_isVisible) RefreshUI();
                 }
-                if (changed)
+                else
                 {
-                    SprayConfigManager.SaveManifest(m);
-                    ReloadAndRefresh();
+                    _shortenError[longUrl] = error ?? "Couldn't shorten this link.";
+                    if (_isVisible) RefreshUI();
                 }
             });
         }
@@ -615,59 +625,47 @@ namespace SprayMod
             });
             row.Add(nameField);
 
-            // Links get an editable URL field (swap the link live).
+            // Links show a read-only status (not an editable field): a short/shareable link, a
+            // "Shortening…" spinner while it's auto re-hosted, or a clear reason it can't be used.
             if (spec.IsUrl)
             {
-                var urlField = new UITK.TextField { value = spec.url ?? "" };
-                urlField.style.flexGrow = 2;
-                urlField.style.flexShrink = 1;
-                urlField.style.minWidth = 80;
-                urlField.style.marginRight = 6;
-                StyleTextField(urlField);
-                urlField.RegisterCallback<UITK.FocusOutEvent>(_ =>
-                {
-                    string v = (urlField.value ?? "").Trim();
-                    if (!string.IsNullOrEmpty(v) && v != (spec.url ?? ""))
-                    {
-                        spec.url = v;
-                        SprayConfigManager.SaveManifest(manifest);
-                        ReloadAndRefresh();
-                    }
-                });
-                row.Add(urlField);
-            }
+                var status = new UITK.Label();
+                status.style.flexGrow = 1;
+                status.style.flexShrink = 1;
+                status.style.minWidth = 60;
+                status.style.marginRight = 6;
+                status.style.fontSize = 13;
+                status.style.whiteSpace = UITK.WhiteSpace.NoWrap;
+                status.style.textOverflow = UITK.TextOverflow.Ellipsis;
+                status.style.overflow = UITK.Overflow.Hidden;
+                status.style.unityTextAlign = new UITK.StyleEnum<TextAnchor>(TextAnchor.MiddleLeft);
+                ForceUIFont(status);
 
-            // Long links can't be shared in chat - offer a one-click re-host to a short permanent
-            // URL (saved back into the list). Short links (e.g. catbox) don't need it.
-            if (spec.IsUrl && !SprayChatSync.UrlFitsInChat(spec.url))
-            {
-                UITK.Button shortenBtn = null;
-                shortenBtn = MakeMiniButton("Short", () =>
+                if (SprayManager.IsHostedShortLink(spec.url))
                 {
-                    if (shortenBtn == null) return;
-                    string oldUrl = spec.url;
-                    var m = SprayManager.Instance;
-                    if (m == null) return;
-                    shortenBtn.text = "...";
-                    shortenBtn.SetEnabled(false);
-                    m.ShortenLink(oldUrl, newUrl =>
-                    {
-                        if (!string.IsNullOrEmpty(newUrl))
-                        {
-                            var man = SprayConfigManager.LoadManifest();
-                            foreach (var s in man.sprays)
-                                if (s.IsUrl && string.Equals(s.url, oldUrl, StringComparison.OrdinalIgnoreCase)) s.url = newUrl;
-                            SprayConfigManager.SaveManifest(man);
-                            ReloadAndRefresh();
-                        }
-                        else if (_isVisible)
-                        {
-                            shortenBtn.text = "Fail";
-                            shortenBtn.SetEnabled(true);
-                        }
-                    });
-                }, 64);
-                row.Add(shortenBtn);
+                    status.text = "Ready - shareable";   // already a clean, permanent, short link
+                    status.style.color = new Color(0.55f, 0.8f, 0.55f);
+                }
+                else if (_shortenWorking.Contains(spec.url))
+                {
+                    status.text = "Shortening link…";
+                    status.style.color = new Color(0.9f, 0.82f, 0.4f);
+                }
+                else if (_shortenError.TryGetValue(spec.url, out var err))
+                {
+                    status.text = err;
+                    // Red if it can't even be shared as-is; amber if it still works but wasn't shortened.
+                    status.style.color = SprayChatSync.UrlFitsInChat(spec.url)
+                        ? new Color(0.9f, 0.82f, 0.4f)
+                        : new Color(0.92f, 0.5f, 0.5f);
+                }
+                else
+                {
+                    status.text = "Shortening link…";
+                    status.style.color = new Color(0.9f, 0.82f, 0.4f);
+                    EnsureShortened(spec.url); // auto-start; refreshes the row when done
+                }
+                row.Add(status);
             }
 
             // Reorder + remove. flexShrink 0 so they never get squeezed/clipped. ASCII labels
@@ -1559,24 +1557,23 @@ namespace SprayMod
             b.style.unityTextAlign = new UITK.StyleEnum<TextAnchor>(TextAnchor.MiddleCenter);
             b.style.height = 50;
             b.style.marginTop = 8;
-            b.style.marginBottom = 22;
+            b.style.marginBottom = 8;
+            b.style.marginLeft = 6; b.style.marginRight = 6;
             b.style.paddingLeft = 18; b.style.paddingRight = 18;
-            b.style.marginLeft = 238;
             b.style.backgroundColor = new UITK.StyleColor(ButtonBg);
             MakeReadable(b);
             AddButtonFlash(b);
             return b;
         }
-        
+
         private UITK.Button MakeCloseButton(string t, Action onClick)
         {
             var b = new UITK.Button(onClick) { text = t.ToUpperInvariant() };
             b.style.unityTextAlign = new UITK.StyleEnum<TextAnchor>(TextAnchor.MiddleCenter);
             b.style.height = 50;
             b.style.marginTop = 8;
-            b.style.marginBottom = 22;
-            b.style.paddingLeft = 18; b.style.paddingRight = 182;
-            b.style.marginLeft = 8;
+            b.style.marginBottom = 8;
+            b.style.paddingLeft = 18; b.style.paddingRight = 18;
             b.style.backgroundColor = new UITK.StyleColor(ButtonBg);
             MakeReadable(b);
             AddButtonFlash(b);

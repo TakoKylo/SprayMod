@@ -22,12 +22,15 @@
     <Description>Spray Mod - Adds spray functionality to the game (IPuckMod native implementation)</Description>
   </PropertyGroup>
 
-  <!-- Ship the preset links manifest + sound next to the DLL (link-first; no bundled images) -->
+  <!-- Ship the preset links manifest + sound next to the DLL (link-first; no bundled images).
+       <Link> flattens them to the output root (beside the DLL), where the mod loads them at runtime. -->
   <ItemGroup>
-    <None Include="default_sprays.json">
+    <None Include="config\default_sprays.json">
+      <Link>default_sprays.json</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
-    <None Include="SpraySound.wav">
+    <None Include="assets\SpraySound.wav">
+      <Link>SpraySound.wav</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
   </ItemGroup>
@@ -54,24 +57,8 @@
   </PropertyGroup>
   
   <ItemGroup>
-    <!-- Explicitly include only our mod source files -->
-    <Compile Include="SprayModMain.cs" />
-    <Compile Include="SprayManager.cs" />
-    <Compile Include="SprayLibrary.cs" />
-    <Compile Include="SprayDecal.cs" />
-    <Compile Include="SprayData.cs" />
-    <Compile Include="SprayManifest.cs" />
-    <Compile Include="SprayConfig.cs" />
-    <Compile Include="SprayUtilities.cs" />
-    <Compile Include="GifDecoder.cs" />
-    <Compile Include="SprayChatPatch.cs" />
-    <Compile Include="SprayChatSync.cs" />
-    <Compile Include="SprayWheelUI.cs" />
-    <Compile Include="SprayClientConfig.cs" />
-    <Compile Include="SprayConfigManager.cs" />
-    <Compile Include="SpraySettingsUI.cs" />
-    <Compile Include="SprayInputHandler.cs" />
-    <Compile Include="ModMenuHub.cs" />
+    <!-- All mod source lives under src/ -->
+    <Compile Include="src\**\*.cs" />
   </ItemGroup>
 
   <ItemGroup>
@@ -102,8 +89,8 @@
     <!-- Ship the plugin: DLL + preset links manifest + sound. Link-first, so no image files. -->
     <Copy SourceFiles="$(OutputPath)SprayMod.dll" DestinationFolder="$(PluginsPath)" SkipUnchangedFiles="true" />
     <Copy SourceFiles="$(OutputPath)SprayMod.pdb" DestinationFolder="$(PluginsPath)" SkipUnchangedFiles="true" Condition="Exists('$(OutputPath)SprayMod.pdb')" />
-    <Copy SourceFiles="$(MSBuildProjectDirectory)\default_sprays.json" DestinationFolder="$(PluginsPath)" SkipUnchangedFiles="true" />
-    <Copy SourceFiles="$(MSBuildProjectDirectory)\SpraySound.wav" DestinationFolder="$(PluginsPath)" SkipUnchangedFiles="true" Condition="Exists('$(MSBuildProjectDirectory)\SpraySound.wav')" />
+    <Copy SourceFiles="$(MSBuildProjectDirectory)\config\default_sprays.json" DestinationFolder="$(PluginsPath)" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="$(MSBuildProjectDirectory)\assets\SpraySound.wav" DestinationFolder="$(PluginsPath)" SkipUnchangedFiles="true" Condition="Exists('$(MSBuildProjectDirectory)\assets\SpraySound.wav')" />
 
     <Message Text="Shipped SprayMod (DLL + default_sprays.json + sound) to: $(PluginsPath)" Importance="high" />
   </Target>

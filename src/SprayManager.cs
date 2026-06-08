@@ -325,19 +325,29 @@ namespace SprayMod
         /// short URL - or null on failure (reason logged as a warning). Unlike <see cref="GetSprayUrl"/>
         /// (temporary litterbox, for ephemeral sharing), this is meant to be saved into sprays.json.
         /// </summary>
-        public void ShortenLink(string url, Action<string> onReady)
+        /// <summary>
+        /// True if a URL is already a short, permanent hosted link that needs no re-hosting
+        /// (i.e. we already put it on catbox, or the user pasted a catbox link). Everything else
+        /// gets auto-shortened so stored links are clean, stable and always fit in chat.
+        /// </summary>
+        public static bool IsHostedShortLink(string url) =>
+            !string.IsNullOrEmpty(url) && url.IndexOf("catbox.moe", StringComparison.OrdinalIgnoreCase) >= 0;
+
+        /// <param name="onDone">Called with (shortUrl, error). On success shortUrl is non-null and
+        /// error is null; on failure shortUrl is null and error is a short human-readable reason.</param>
+        public void ShortenLink(string url, Action<string, string> onDone)
         {
             if (string.IsNullOrEmpty(url) ||
                 (!url.StartsWith("http://", StringComparison.OrdinalIgnoreCase) &&
                  !url.StartsWith("https://", StringComparison.OrdinalIgnoreCase)))
             {
-                onReady?.Invoke(null);
+                onDone?.Invoke(null, "Not a valid http(s) link.");
                 return;
             }
-            StartCoroutine(ShortenCoroutine(url, onReady));
+            StartCoroutine(ShortenCoroutine(url, onDone));
         }
 
-        private IEnumerator ShortenCoroutine(string url, Action<string> onReady)
+        private IEnumerator ShortenCoroutine(string url, Action<string, string> onDone)
         {
             byte[] bytes = null;
             string contentType = null;
@@ -350,25 +360,32 @@ namespace SprayMod
                     bytes = dl.downloadHandler.data;
                     contentType = dl.GetResponseHeader("Content-Type");
                 }
-                else Debug.LogWarning($"[SprayMod] Shorten: download failed: {dl.error} ({url})");
+                else
+                {
+                    Debug.LogWarning($"[SprayMod] Shorten: download failed: {dl.error} ({url})");
+                    onDone?.Invoke(null, "Couldn't reach the link.");
+                    yield break;
+                }
             }
 
-            if (bytes == null || bytes.Length == 0) { onReady?.Invoke(null); yield break; }
+            if (bytes == null || bytes.Length == 0) { onDone?.Invoke(null, "The link returned no data."); yield break; }
             if (bytes.Length > MAX_UPLOAD_BYTES)
             {
-                Debug.LogWarning($"[SprayMod] Shorten: image too large to host (>{MAX_UPLOAD_BYTES / (1024 * 1024)}MB): {url}");
-                onReady?.Invoke(null);
+                onDone?.Invoke(null, $"Image too large (max {MAX_UPLOAD_BYTES / (1024 * 1024)} MB).");
                 yield break;
             }
             // Reject non-images up front so we never host (or "successfully" shorten) a video/web page.
             if (!string.IsNullOrEmpty(contentType) && !contentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
             {
-                Debug.LogWarning($"[SprayMod] Shorten: link is '{contentType}', not an image - videos and gallery/web pages can't be sprays: {url}");
-                onReady?.Invoke(null);
+                string kind = contentType.StartsWith("video/", StringComparison.OrdinalIgnoreCase) ? "a video"
+                            : contentType.StartsWith("text/", StringComparison.OrdinalIgnoreCase) ? "a web page"
+                            : $"'{contentType}'";
+                Debug.LogWarning($"[SprayMod] Shorten: link is {kind}, not an image: {url}");
+                onDone?.Invoke(null, $"That link is {kind}, not an image (use a direct PNG/JPG/GIF).");
                 yield break;
             }
 
-            string resultUrl = null;
+            string resultUrl = null, error = null;
             var form = new List<IMultipartFormSection>
             {
                 new MultipartFormDataSection("reqtype", "fileupload"),
@@ -383,12 +400,12 @@ namespace SprayMod
                     string text = req.downloadHandler.text?.Trim();
                     if (!string.IsNullOrEmpty(text) && text.StartsWith("http", StringComparison.OrdinalIgnoreCase))
                         resultUrl = text;
-                    else Debug.LogWarning($"[SprayMod] Shorten: unexpected upload response: {text}");
+                    else { error = "Host returned an unexpected response."; Debug.LogWarning($"[SprayMod] Shorten: unexpected upload response: {text}"); }
                 }
-                else Debug.LogWarning($"[SprayMod] Shorten: upload failed: {req.error}");
+                else { error = "Upload failed — try again."; Debug.LogWarning($"[SprayMod] Shorten: upload failed: {req.error}"); }
             }
 
-            onReady?.Invoke(resultUrl);
+            onDone?.Invoke(resultUrl, error);
         }
 
         private static string GuessFileName(string url)

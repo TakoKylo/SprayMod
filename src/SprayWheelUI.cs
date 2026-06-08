@@ -99,7 +99,11 @@ namespace SprayMod
         private static VisualElement GetGameRoot()
         {
             var uiMgr = MonoBehaviourSingleton<UIManager>.Instance;
-            if (uiMgr != null && uiMgr.RootVisualElement != null) return uiMgr.RootVisualElement;
+            // Use the UIDocument's root (the true full-screen panel), exactly like the settings UI.
+            // UIManager.RootVisualElement is a narrower sub-container, which made our overlay - and
+            // therefore the centred wheel/buttons/prompt - sit in the left part of the screen.
+            if (uiMgr != null && uiMgr.UIDocument != null && uiMgr.UIDocument.rootVisualElement != null)
+                return uiMgr.UIDocument.rootVisualElement;
             var doc = UnityEngine.Object.FindFirstObjectByType<UIDocument>(FindObjectsInactive.Include);
             return doc != null ? doc.rootVisualElement : null;
         }
@@ -118,12 +122,28 @@ namespace SprayMod
                 radius = Mathf.Max(Radius, count * (ItemSize + 16f) / (2f * Mathf.PI));
 
             float wheelDim = radius * 2f + ItemSize;
+            float barGap = 14f;     // space between ring and button bar
+            float barHeight = 40f;  // reserved height for the button row
+
+            // Centre the whole assembly (ring + button bar) with absolute positioning + translate,
+            // the same technique the add-link prompt uses (which centres reliably here; flex centring
+            // on the game's UI root did not). The ring sits at the top of this box; the bar is pinned
+            // to the box's horizontal centre below it, so the buttons line up under the ring.
+            var content = new VisualElement { name = "SprayWheelContent" };
+            content.style.position = Position.Absolute;
+            content.style.left = new Length(50, LengthUnit.Percent);
+            content.style.top = new Length(50, LengthUnit.Percent);
+            content.style.width = wheelDim;
+            content.style.height = wheelDim + barGap + barHeight;
+            content.style.translate = new Translate(new Length(-50, LengthUnit.Percent), new Length(-50, LengthUnit.Percent), 0);
+            _overlay.Add(content);
+
             _wheel = new VisualElement { name = "SprayWheel" };
+            _wheel.style.position = Position.Absolute;
+            _wheel.style.left = 0; _wheel.style.top = 0;
             _wheel.style.width = wheelDim;
             _wheel.style.height = wheelDim;
-            _wheel.style.position = Position.Relative;
-            _wheel.style.flexShrink = 0;
-            _overlay.Add(_wheel);
+            content.Add(_wheel);
 
             float cx = wheelDim / 2f;
 
@@ -161,21 +181,20 @@ namespace SprayMod
                 }
             }
 
-            // Action bar - a row BELOW the wheel (sibling in the overlay column) so it never
-            // overlaps the radial items. Sized to content and centred by the overlay; wraps to a
-            // second row if the buttons are wider than the wheel (small libraries).
+            // Action bar - pinned to the content box's horizontal centre (left:50% + translateX:-50%,
+            // exactly like the prompt) and placed just below the ring, so the buttons are centred on
+            // the ring's centre regardless of how the game's UI root lays things out.
             var bar = new VisualElement();
-            bar.style.maxWidth = Mathf.Max(wheelDim, 480f);
+            bar.style.position = Position.Absolute;
+            bar.style.top = wheelDim + barGap;
+            bar.style.left = new Length(50, LengthUnit.Percent);
+            bar.style.translate = new Translate(new Length(-50, LengthUnit.Percent), 0, 0);
             bar.style.flexDirection = FlexDirection.Row;
-            bar.style.flexWrap = Wrap.Wrap;
-            bar.style.justifyContent = Justify.Center;
             bar.style.alignItems = Align.Center;
-            bar.style.marginTop = 14f;
-            bar.style.flexShrink = 0;
             bar.Add(MakeButton("ADD LINK", ShowAddLinkPrompt));
             bar.Add(MakeButton("CLEAR ALL", () => { _onClear?.Invoke(); Hide(); }));
             bar.Add(MakeButton("CLOSE", Hide));
-            _overlay.Add(bar);
+            content.Add(bar);
         }
 
         // ---- add-link prompt (paste an image URL straight from the wheel) ----
@@ -255,11 +274,11 @@ namespace SprayMod
                 SprayConfigManager.SaveManifest(manifest);
                 SprayManager.Instance?.LoadLibrary(_ => { if (_visible) Rebuild(); });
 
-                // A link too long for chat can't be shared as-is - auto re-host it to a short,
-                // permanent URL and save that back into the list (matched by its current URL).
-                if (!SprayChatSync.UrlFitsInChat(url))
+                // Auto re-host any non-catbox link to a short, permanent URL and save it back into
+                // the list (matched by its current URL), so stored links stay clean and shareable.
+                if (!SprayManager.IsHostedShortLink(url))
                 {
-                    SprayManager.Instance?.ShortenLink(url, newUrl =>
+                    SprayManager.Instance?.ShortenLink(url, (newUrl, error) =>
                     {
                         if (string.IsNullOrEmpty(newUrl)) return;
                         var m = SprayConfigManager.LoadManifest();
@@ -384,9 +403,13 @@ namespace SprayMod
             b.style.height = 34;
             b.style.minWidth = 110;
             b.style.marginLeft = 6; b.style.marginRight = 6;
+            b.style.paddingTop = 0; b.style.paddingBottom = 0;
+            b.style.paddingLeft = 10; b.style.paddingRight = 10;
             b.style.backgroundColor = ItemBg;
             b.style.color = TextCol;
             b.style.unityFontStyleAndWeight = FontStyle.Bold;
+            b.style.unityTextAlign = TextAnchor.MiddleCenter; // centre the label in the button (was top-left)
+            b.style.whiteSpace = WhiteSpace.NoWrap;
             b.style.fontSize = 13;
             Round(b, 8f);
             SetBorder(b, 1f, new Color(1, 1, 1, 0.12f));
