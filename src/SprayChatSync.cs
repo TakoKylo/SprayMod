@@ -134,9 +134,14 @@ namespace SprayMod
         public static bool TryDecode(string content, out bool isUrl, out string reference, out Vector3 pos, out Vector3 normal, out float scale)
         {
             isUrl = false; reference = null; pos = Vector3.zero; normal = Vector3.up; scale = 1f;
-            if (string.IsNullOrEmpty(content) || !content.StartsWith(MARKER, StringComparison.Ordinal)) return false;
+            if (string.IsNullOrEmpty(content)) return false;
 
-            int b64Start = MARKER.Length;
+            // Locate the marker ANYWHERE in the message - some servers/mods colour-wrap or prefix
+            // chat (e.g. "<color=#fff>!SX2:...</color>"), so it isn't always at index 0.
+            int markerIdx = content.IndexOf(MARKER, StringComparison.Ordinal);
+            if (markerIdx < 0) return false;
+
+            int b64Start = markerIdx + MARKER.Length;
             int typeIndex = b64Start + B64_LEN;
             if (content.Length <= typeIndex) return false;
 
@@ -147,6 +152,11 @@ namespace SprayMod
 
             char type = content[typeIndex];
             reference = content.Substring(typeIndex + 1);
+            // Drop any trailing markup a server/mod may append (e.g. "</color>"); URLs and hex
+            // hashes never contain '<'.
+            int lt = reference.IndexOf('<');
+            if (lt >= 0) reference = reference.Substring(0, lt);
+            reference = reference.Trim();
             if (string.IsNullOrEmpty(reference)) return false;
             isUrl = type == 'u';
 
@@ -196,7 +206,9 @@ namespace SprayMod
             {
                 if (chatMessage == null) return true;
                 string content = chatMessage.Content.ToString();
-                if (content == null || !content.StartsWith(SprayChatSync.MARKER, StringComparison.Ordinal))
+                // Match the marker ANYWHERE - some servers colour-wrap/prefix chat, so it isn't
+                // always at the start (that was leaking spray messages into chat on those servers).
+                if (string.IsNullOrEmpty(content) || content.IndexOf(SprayChatSync.MARKER, StringComparison.Ordinal) < 0)
                     return true; // normal message - let it through
 
                 string steamId = chatMessage.SteamID.HasValue ? chatMessage.SteamID.Value.ToString() : string.Empty;
