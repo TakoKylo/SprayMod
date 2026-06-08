@@ -1,0 +1,12 @@
+{
+  "EnableSpraySharing": true,
+  "MaxSpraysPerPlayer": 10,
+  "MaxTotalSprays": 100,
+  "SprayLifetime": 0.0,
+  "PersistBetweenRounds": false,
+  "SprayCooldown": 1.0,
+  "EnableSpraySound": true,
+  "AllowCustomSprays": true,
+  "MaxSprayImageSize": 512,
+  "DebugMode": false
+}

@@ -1,0 +1,111 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <!-- Target .NET 4.8 for Puck game compatibility -->
+    <TargetFramework>net48</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>SprayMod</AssemblyName>
+    <RootNamespace>SprayMod</RootNamespace>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <DebugType>portable</DebugType>
+    <Optimize>true</Optimize>
+    <Deterministic>true</Deterministic>
+
+    <!-- Build to workshop folder -->
+    <OutputPath>C:\Program Files (x86)\Steam\steamapps\workshop\content\2994020\3616246797\</OutputPath>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    
+    <!-- Enable assembly info generation -->
+    <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <Description>Spray Mod - Adds spray functionality to the game (IPuckMod native implementation)</Description>
+  </PropertyGroup>
+
+  <!-- Ship the preset links manifest + sound next to the DLL (link-first; no bundled images) -->
+  <ItemGroup>
+    <None Include="default_sprays.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Include="SpraySound.wav">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+  <!-- Completely exclude reference folders from the project -->
+  <ItemGroup>
+    <Compile Remove="Puck_Reference_DoNotCompile\**" />
+    <Compile Remove="puck2_Reference_DoNotCompile\**" />
+    <EmbeddedResource Remove="Puck_Reference_DoNotCompile\**" />
+    <EmbeddedResource Remove="puck2_Reference_DoNotCompile\**" />
+    <None Remove="Puck_Reference_DoNotCompile\**" />
+    <None Remove="puck2_Reference_DoNotCompile\**" />
+  </ItemGroup>
+  
+  <ItemGroup>
+    <!-- Prevent MSBuild from even discovering these folders -->
+    <None Include="Puck_Reference_DoNotCompile\**" Visible="false" />
+    <None Include="puck2_Reference_DoNotCompile\**" Visible="false" />
+  </ItemGroup>
+  
+  <PropertyGroup>
+    <!-- Disable default compile behavior for reference folders -->
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+  
+  <ItemGroup>
+    <!-- Explicitly include only our mod source files -->
+    <Compile Include="SprayModMain.cs" />
+    <Compile Include="SprayManager.cs" />
+    <Compile Include="SprayLibrary.cs" />
+    <Compile Include="SprayDecal.cs" />
+    <Compile Include="SprayData.cs" />
+    <Compile Include="SprayManifest.cs" />
+    <Compile Include="SprayConfig.cs" />
+    <Compile Include="SprayUtilities.cs" />
+    <Compile Include="GifDecoder.cs" />
+    <Compile Include="SprayChatPatch.cs" />
+    <Compile Include="SprayChatSync.cs" />
+    <Compile Include="SprayWheelUI.cs" />
+    <Compile Include="SprayClientConfig.cs" />
+    <Compile Include="SprayConfigManager.cs" />
+    <Compile Include="SpraySettingsUI.cs" />
+    <Compile Include="SprayInputHandler.cs" />
+    <Compile Include="ModMenuHub.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Reference all game libs from libs/, DO NOT copy them (Private=false) -->
+    <Libs Include="libs\*.dll" 
+          Exclude="libs\System.*.dll;libs\BepInEx.dll;libs\BepInEx.*.dll" />
+    <Reference Include="@(Libs)">
+      <HintPath>%(Libs.FullPath)</HintPath>
+      <Private>false</Private> <!-- Critical: prevents copying DLLs, avoids type conflicts -->
+    </Reference>
+  </ItemGroup>
+
+  <!-- Optional: Additional system references if needed -->
+  <ItemGroup>
+    <Reference Include="System" />
+    <Reference Include="System.Core" />
+    <Reference Include="System.Xml" />
+    <Reference Include="System.Drawing" />
+  </ItemGroup>
+
+  <!-- Post-build: Copy to Puck plugins folder for testing -->
+  <Target Name="CopyToPlugins" AfterTargets="Build">
+    <PropertyGroup>
+      <PluginsPath>C:\Program Files (x86)\Steam\steamapps\common\Puck\Plugins\SprayMod\</PluginsPath>
+      <PluginConfigPath>C:\Program Files (x86)\Steam\steamapps\common\Puck\config\</PluginConfigPath>
+    </PropertyGroup>
+    
+    <!-- Ship the plugin: DLL + preset links manifest + sound. Link-first, so no image files. -->
+    <Copy SourceFiles="$(OutputPath)SprayMod.dll" DestinationFolder="$(PluginsPath)" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="$(OutputPath)SprayMod.pdb" DestinationFolder="$(PluginsPath)" SkipUnchangedFiles="true" Condition="Exists('$(OutputPath)SprayMod.pdb')" />
+    <Copy SourceFiles="$(MSBuildProjectDirectory)\default_sprays.json" DestinationFolder="$(PluginsPath)" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="$(MSBuildProjectDirectory)\SpraySound.wav" DestinationFolder="$(PluginsPath)" SkipUnchangedFiles="true" Condition="Exists('$(MSBuildProjectDirectory)\SpraySound.wav')" />
+
+    <Message Text="Shipped SprayMod (DLL + default_sprays.json + sound) to: $(PluginsPath)" Importance="high" />
+  </Target>
+
+</Project>

@@ -1,0 +1,17 @@
+# Build output
+obj/
+bin/
+
+# Visual Studio / Rider / VS Code user files
+.vs/
+.idea/
+*.user
+*.suo
+
+# Claude Code working memory (local notes with machine-specific paths)
+memory/
+
+# Proprietary Puck / Unity game assemblies — not redistributable.
+# Supply your own to build (see libs/README.md).
+libs/*
+!libs/README.md
