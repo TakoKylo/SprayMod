@@ -227,35 +227,79 @@ namespace SprayMod
             hint.style.marginTop = 4; hint.style.marginBottom = 8;
             prompt.Add(hint);
 
-            var field = new TextField { name = "AddLinkField" };
-            field.style.marginBottom = 10;
-            field.style.minHeight = 28;
-            prompt.Add(field);
+            var linkLabel = MakeLabel("IMAGE LINK", 11, SubTextCol, true);
+            linkLabel.style.unityTextAlign = TextAnchor.MiddleLeft;
+            linkLabel.style.marginBottom = 2;
+            prompt.Add(linkLabel);
+            var urlField = MakeInput("AddLinkUrl");
+            prompt.Add(urlField);
 
-            var btnRow = new VisualElement();
-            btnRow.style.flexDirection = FlexDirection.Row;
-            btnRow.style.justifyContent = Justify.Center;
-            btnRow.Add(MakeButton("ADD", () =>
+            var nameLabel = MakeLabel("NAME (OPTIONAL)", 11, SubTextCol, true);
+            nameLabel.style.unityTextAlign = TextAnchor.MiddleLeft;
+            nameLabel.style.marginTop = 4; nameLabel.style.marginBottom = 2;
+            prompt.Add(nameLabel);
+            var nameField = MakeInput("AddLinkName");
+            nameField.style.marginBottom = 12;
+            prompt.Add(nameField);
+
+            void Submit()
             {
-                string url = (field.value ?? string.Empty).Trim();
+                string url = (urlField.value ?? string.Empty).Trim();
                 if (url.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
                     url.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
                 {
-                    AddLinkSpray(url);
+                    AddLinkSpray(url, (nameField.value ?? string.Empty).Trim());
                     CloseAddLinkPrompt();
                 }
                 else
                 {
-                    hint.text = "That isn't a valid http(s) link. Paste a full image URL.";
+                    hint.text = "That isn't a valid http(s) link — paste a full image URL.";
+                    hint.style.color = new Color(0.92f, 0.5f, 0.5f);
                 }
-            }));
+            }
+
+            // Enter in either field submits.
+            urlField.RegisterCallback<KeyDownEvent>(e => { if (e.keyCode == KeyCode.Return || e.keyCode == KeyCode.KeypadEnter) Submit(); });
+            nameField.RegisterCallback<KeyDownEvent>(e => { if (e.keyCode == KeyCode.Return || e.keyCode == KeyCode.KeypadEnter) Submit(); });
+
+            var btnRow = new VisualElement();
+            btnRow.style.flexDirection = FlexDirection.Row;
+            btnRow.style.justifyContent = Justify.Center;
+            btnRow.Add(MakeButton("ADD", Submit));
             btnRow.Add(MakeButton("CANCEL", CloseAddLinkPrompt));
             prompt.Add(btnRow);
 
             _overlay.Add(prompt);
             _addLinkPrompt = prompt;
             prompt.BringToFront();
-            field.Focus();
+            urlField.Focus();
+        }
+
+        /// <summary>A clearly-styled single-line text input (visible dark box + accent border).</summary>
+        private TextField MakeInput(string name)
+        {
+            var tf = new TextField { name = name };
+            tf.style.height = 32;
+            tf.style.marginBottom = 6;
+            tf.style.fontSize = 14;
+            tf.style.color = TextCol;
+            tf.RegisterCallback<AttachToPanelEvent>(_ =>
+            {
+                var input = tf.Q("unity-text-input");
+                if (input == null) return;
+                input.style.backgroundColor = new Color(0.16f, 0.16f, 0.18f);
+                input.style.color = TextCol;
+                input.style.fontSize = 14;
+                input.style.paddingLeft = 8; input.style.paddingRight = 8;
+                input.style.borderTopWidth = 1; input.style.borderBottomWidth = 1;
+                input.style.borderLeftWidth = 1; input.style.borderRightWidth = 1;
+                var bc = new Color(0.45f, 0.6f, 0.9f);
+                input.style.borderTopColor = bc; input.style.borderBottomColor = bc;
+                input.style.borderLeftColor = bc; input.style.borderRightColor = bc;
+                input.style.borderTopLeftRadius = 6; input.style.borderTopRightRadius = 6;
+                input.style.borderBottomLeftRadius = 6; input.style.borderBottomRightRadius = 6;
+            });
+            return tf;
         }
 
         private void CloseAddLinkPrompt()
@@ -264,13 +308,13 @@ namespace SprayMod
             _addLinkPrompt = null;
         }
 
-        /// <summary>Appends a URL spray to the manifest, reloads the library, then rebuilds the wheel.</summary>
-        private void AddLinkSpray(string url)
+        /// <summary>Appends a named URL spray to the manifest, reloads the library, then rebuilds the wheel.</summary>
+        private void AddLinkSpray(string url, string name)
         {
             try
             {
                 var manifest = SprayConfigManager.LoadManifest();
-                manifest.sprays.Add(new SpraySpec { name = string.Empty, url = url });
+                manifest.sprays.Add(new SpraySpec { name = name ?? string.Empty, url = url });
                 SprayConfigManager.SaveManifest(manifest);
                 SprayManager.Instance?.LoadLibrary(_ => { if (_visible) Rebuild(); });
 

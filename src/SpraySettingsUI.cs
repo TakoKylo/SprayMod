@@ -466,7 +466,15 @@ namespace SprayMod
                 SprayManager.Instance?.ApplyDisplaySettings(v, _config.SprayOpacity);
                 SaveConfig();
             });
-            
+
+            // How long a spray lasts before it fades out (0 = stays until replaced). Applies to
+            // newly placed sprays.
+            AddSliderRow("Spray Lifetime (sec, 0 = forever)", _config.SprayLifetime, 0f, 120f, v =>
+            {
+                _config.SprayLifetime = Mathf.Round(v);
+                SaveConfig();
+            });
+
             // Spray folder info
             var infoLabel = new UITK.Label($"Spray images folder:\n{SprayConfigManager.GetSprayImagesFolderPath()}");
             infoLabel.style.fontSize = 14;

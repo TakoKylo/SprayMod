@@ -38,7 +38,7 @@ namespace SprayMod
         private readonly Dictionary<string, SprayLibraryEntry> urlCache = new Dictionary<string, SprayLibraryEntry>();
         private readonly HashSet<string> pendingUrls = new HashSet<string>();
         private const int MAX_URL_CACHE = 64;
-        private const int MAX_DOWNLOAD_BYTES = 8 * 1024 * 1024; // 8 MB safety cap
+        private const int MAX_DOWNLOAD_BYTES = 20 * 1024 * 1024; // safety cap (well under host limits; keeps per-placement download sane)
 
         public bool IsLibraryLoading => Library.IsLoading;
         public int LibraryCount => Library.Count;
@@ -311,7 +311,7 @@ namespace SprayMod
 
         // ---- auto-upload (so file sprays are visible to everyone) ----
 
-        private const int MAX_UPLOAD_BYTES = 5 * 1024 * 1024; // 5 MB
+        private const int MAX_UPLOAD_BYTES = 20 * 1024 * 1024; // matches the download cap (catbox allows ~200MB; this just keeps sprays reasonable)
         private const string LITTERBOX_API = "https://litterbox.catbox.moe/resources/internals/api.php";
         private const string LITTERBOX_TIME = "72h"; // temporary host; sprays are ephemeral anyway
         private const string CATBOX_API = "https://catbox.moe/user/api.php"; // PERMANENT host (for shortening stored links)
@@ -374,14 +374,22 @@ namespace SprayMod
                 onDone?.Invoke(null, $"Image too large (max {MAX_UPLOAD_BYTES / (1024 * 1024)} MB).");
                 yield break;
             }
-            // Reject non-images up front so we never host (or "successfully" shorten) a video/web page.
-            if (!string.IsNullOrEmpty(contentType) && !contentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
+
+            // Validate it's REALLY an image by decoding the bytes (off-thread). Content-type alone is
+            // unreliable: some CDNs serve images as octet-stream, and Tenor/Giphy "view" links serve
+            // an HTML page. Accept if it decodes OR the host clearly says image/*.
+            var probe = System.Threading.Tasks.Task.Run(() => GifDecoder.DecodeBytes(bytes, MAX_TEXTURE_SIZE));
+            while (!probe.IsCompleted) yield return null;
+            bool decoded = false;
+            try { var di = probe.Result; decoded = di != null && di.Frames.Count > 0; } catch { decoded = false; }
+            bool looksImage = decoded || (!string.IsNullOrEmpty(contentType) && contentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase));
+            if (!looksImage)
             {
-                string kind = contentType.StartsWith("video/", StringComparison.OrdinalIgnoreCase) ? "a video"
-                            : contentType.StartsWith("text/", StringComparison.OrdinalIgnoreCase) ? "a web page"
-                            : $"'{contentType}'";
-                Debug.LogWarning($"[SprayMod] Shorten: link is {kind}, not an image: {url}");
-                onDone?.Invoke(null, $"That link is {kind}, not an image (use a direct PNG/JPG/GIF).");
+                string kind = !string.IsNullOrEmpty(contentType) && contentType.StartsWith("video/", StringComparison.OrdinalIgnoreCase) ? "a video"
+                            : !string.IsNullOrEmpty(contentType) && contentType.StartsWith("text/", StringComparison.OrdinalIgnoreCase) ? "a web page (e.g. a Tenor/Giphy view page)"
+                            : "not a direct image";
+                Debug.LogWarning($"[SprayMod] Shorten: {url} is {kind} (content-type '{contentType}')");
+                onDone?.Invoke(null, $"Not a direct image link - it's {kind}. Right-click the image, Copy image address (must end in .png/.jpg/.gif).");
                 yield break;
             }
 

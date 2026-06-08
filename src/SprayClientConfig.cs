@@ -43,10 +43,10 @@ namespace SprayMod
         public float SpraySize { get; set; } = 1.0f;
 
         [Description("Maximum simultaneous sprays per player (oldest removed first, 0 = unlimited)")]
-        public int MaxSpraysPerPlayer { get; set; } = 10;
+        public int MaxSpraysPerPlayer { get; set; } = 1;
 
-        [Description("Spray lifetime in seconds (0 = until limit reached)")]
-        public float SprayLifetime { get; set; } = 0f;
+        [Description("Spray lifetime in seconds before it fades out (0 = until limit reached)")]
+        public float SprayLifetime { get; set; } = 30f;
 
         [Description("Minimum seconds between your own sprays")]
         public float SprayCooldown { get; set; } = 1.0f;
