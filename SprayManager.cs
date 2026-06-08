@@ -540,7 +540,9 @@ namespace SprayMod
                 fromCache = data != null && data.Length > 0;
             }
 
-            // 2) Otherwise fetch from the web and cache the bytes for next time.
+            // 2) Otherwise fetch from the web. We only cache the bytes AFTER a successful decode
+            // (below) so a non-image response - e.g. an HTML page from a gallery/page link - never
+            // poisons the disk cache.
             if (data == null || data.Length == 0)
             {
                 using (var req = UnityWebRequest.Get(url))
@@ -548,12 +550,9 @@ namespace SprayMod
                     req.timeout = 20;
                     yield return req.SendWebRequest();
                     if (req.result == UnityWebRequest.Result.Success)
-                    {
                         data = req.downloadHandler.data;
-                        if (data != null && data.Length > 0 && data.Length <= MAX_DOWNLOAD_BYTES)
-                            WriteUrlCache(cachePath, data);
-                    }
-                    else SprayUtilities.DebugLog($"URL download failed: {req.error} ({url})");
+                    else
+                        Debug.LogWarning($"[SprayMod] Spray link download failed: {req.error} ({url})");
                 }
             }
 
@@ -591,15 +590,21 @@ namespace SprayMod
                         entry.Frames.Add(tex);
                         entry.Delays.Add(0.1f);
                     }
-                    else { UnityEngine.Object.Destroy(tex); SprayUtilities.DebugLog($"Could not decode URL image: {url}"); }
+                    else { UnityEngine.Object.Destroy(tex); Debug.LogWarning($"[SprayMod] Could not decode spray link as an image - is it a DIRECT image URL (ending in .png/.jpg/.gif), not a gallery/web page? {url}"); }
                 }
             }
             else SprayUtilities.DebugLog($"URL image unavailable or too large: {url}");
 
-            // A cached file that won't decode is corrupt - drop it so it re-downloads next time.
-            if (entry == null && fromCache)
+            if (entry != null)
             {
-                try { File.Delete(cachePath); } catch { }
+                // Cache the raw bytes for instant/offline loads next time - only ever good images.
+                if (!fromCache && data != null && data.Length > 0 && data.Length <= MAX_DOWNLOAD_BYTES)
+                    WriteUrlCache(cachePath, data);
+            }
+            else
+            {
+                // Nothing decoded: don't keep an undecodable/garbage response (e.g. HTML) on disk.
+                try { if (File.Exists(cachePath)) File.Delete(cachePath); } catch { }
             }
 
             pendingUrls.Remove(url);
