@@ -534,7 +534,40 @@ namespace SprayMod
                 manifest.sprays.Add(new SpraySpec { name = "", url = url });
                 SprayConfigManager.SaveManifest(manifest);
                 ReloadAndRefresh();
+                // A link too long for chat can't be shared as-is - auto re-host it to a short,
+                // permanent URL and save that back into the list.
+                if (!SprayChatSync.UrlFitsInChat(url))
+                    ShortenSprayLink(url);
             }
+        }
+
+        /// <summary>
+        /// Re-hosts a too-long library link to a short permanent URL and writes it back into
+        /// sprays.json (matched by its current URL), then reloads. No-op on failure (logged).
+        /// </summary>
+        private void ShortenSprayLink(string oldUrl)
+        {
+            var mgr = SprayManager.Instance;
+            if (mgr == null || string.IsNullOrEmpty(oldUrl)) return;
+            mgr.ShortenLink(oldUrl, newUrl =>
+            {
+                if (string.IsNullOrEmpty(newUrl)) return;
+                var m = SprayConfigManager.LoadManifest();
+                bool changed = false;
+                foreach (var s in m.sprays)
+                {
+                    if (s.IsUrl && string.Equals(s.url, oldUrl, StringComparison.OrdinalIgnoreCase))
+                    {
+                        s.url = newUrl;
+                        changed = true;
+                    }
+                }
+                if (changed)
+                {
+                    SprayConfigManager.SaveManifest(m);
+                    ReloadAndRefresh();
+                }
+            });
         }
 
         private UITK.VisualElement BuildSprayRow(SprayManifest manifest, int index)
@@ -602,6 +635,39 @@ namespace SprayMod
                     }
                 });
                 row.Add(urlField);
+            }
+
+            // Long links can't be shared in chat - offer a one-click re-host to a short permanent
+            // URL (saved back into the list). Short links (e.g. catbox) don't need it.
+            if (spec.IsUrl && !SprayChatSync.UrlFitsInChat(spec.url))
+            {
+                UITK.Button shortenBtn = null;
+                shortenBtn = MakeMiniButton("Short", () =>
+                {
+                    if (shortenBtn == null) return;
+                    string oldUrl = spec.url;
+                    var m = SprayManager.Instance;
+                    if (m == null) return;
+                    shortenBtn.text = "...";
+                    shortenBtn.SetEnabled(false);
+                    m.ShortenLink(oldUrl, newUrl =>
+                    {
+                        if (!string.IsNullOrEmpty(newUrl))
+                        {
+                            var man = SprayConfigManager.LoadManifest();
+                            foreach (var s in man.sprays)
+                                if (s.IsUrl && string.Equals(s.url, oldUrl, StringComparison.OrdinalIgnoreCase)) s.url = newUrl;
+                            SprayConfigManager.SaveManifest(man);
+                            ReloadAndRefresh();
+                        }
+                        else if (_isVisible)
+                        {
+                            shortenBtn.text = "Fail";
+                            shortenBtn.SetEnabled(true);
+                        }
+                    });
+                }, 64);
+                row.Add(shortenBtn);
             }
 
             // Reorder + remove. flexShrink 0 so they never get squeezed/clipped. ASCII labels

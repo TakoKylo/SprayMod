@@ -314,6 +314,94 @@ namespace SprayMod
         private const int MAX_UPLOAD_BYTES = 5 * 1024 * 1024; // 5 MB
         private const string LITTERBOX_API = "https://litterbox.catbox.moe/resources/internals/api.php";
         private const string LITTERBOX_TIME = "72h"; // temporary host; sprays are ephemeral anyway
+        private const string CATBOX_API = "https://catbox.moe/user/api.php"; // PERMANENT host (for shortening stored links)
+
+        // ---- shorten a stored library link to a short, permanent URL ----
+
+        /// <summary>
+        /// Re-hosts a long image link to a short, PERMANENT catbox URL so it can be stored in the
+        /// library and broadcast directly in chat (no per-placement re-hosting needed). Downloads
+        /// the image, rejects non-images (videos/pages), uploads it, and calls back with the new
+        /// short URL - or null on failure (reason logged as a warning). Unlike <see cref="GetSprayUrl"/>
+        /// (temporary litterbox, for ephemeral sharing), this is meant to be saved into sprays.json.
+        /// </summary>
+        public void ShortenLink(string url, Action<string> onReady)
+        {
+            if (string.IsNullOrEmpty(url) ||
+                (!url.StartsWith("http://", StringComparison.OrdinalIgnoreCase) &&
+                 !url.StartsWith("https://", StringComparison.OrdinalIgnoreCase)))
+            {
+                onReady?.Invoke(null);
+                return;
+            }
+            StartCoroutine(ShortenCoroutine(url, onReady));
+        }
+
+        private IEnumerator ShortenCoroutine(string url, Action<string> onReady)
+        {
+            byte[] bytes = null;
+            string contentType = null;
+            using (var dl = UnityWebRequest.Get(url))
+            {
+                dl.timeout = 25;
+                yield return dl.SendWebRequest();
+                if (dl.result == UnityWebRequest.Result.Success)
+                {
+                    bytes = dl.downloadHandler.data;
+                    contentType = dl.GetResponseHeader("Content-Type");
+                }
+                else Debug.LogWarning($"[SprayMod] Shorten: download failed: {dl.error} ({url})");
+            }
+
+            if (bytes == null || bytes.Length == 0) { onReady?.Invoke(null); yield break; }
+            if (bytes.Length > MAX_UPLOAD_BYTES)
+            {
+                Debug.LogWarning($"[SprayMod] Shorten: image too large to host (>{MAX_UPLOAD_BYTES / (1024 * 1024)}MB): {url}");
+                onReady?.Invoke(null);
+                yield break;
+            }
+            // Reject non-images up front so we never host (or "successfully" shorten) a video/web page.
+            if (!string.IsNullOrEmpty(contentType) && !contentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
+            {
+                Debug.LogWarning($"[SprayMod] Shorten: link is '{contentType}', not an image - videos and gallery/web pages can't be sprays: {url}");
+                onReady?.Invoke(null);
+                yield break;
+            }
+
+            string resultUrl = null;
+            var form = new List<IMultipartFormSection>
+            {
+                new MultipartFormDataSection("reqtype", "fileupload"),
+                new MultipartFormFileSection("fileToUpload", bytes, GuessFileName(url), "application/octet-stream")
+            };
+            using (var req = UnityWebRequest.Post(CATBOX_API, form))
+            {
+                req.timeout = 60;
+                yield return req.SendWebRequest();
+                if (req.result == UnityWebRequest.Result.Success)
+                {
+                    string text = req.downloadHandler.text?.Trim();
+                    if (!string.IsNullOrEmpty(text) && text.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+                        resultUrl = text;
+                    else Debug.LogWarning($"[SprayMod] Shorten: unexpected upload response: {text}");
+                }
+                else Debug.LogWarning($"[SprayMod] Shorten: upload failed: {req.error}");
+            }
+
+            onReady?.Invoke(resultUrl);
+        }
+
+        private static string GuessFileName(string url)
+        {
+            try
+            {
+                string path = new Uri(url).AbsolutePath;
+                string name = Path.GetFileName(path);
+                if (!string.IsNullOrEmpty(name) && name.Contains(".")) return name;
+            }
+            catch { }
+            return "spray.png";
+        }
 
         private readonly Dictionary<string, string> uploadCache = new Dictionary<string, string>();           // content hash -> uploaded URL
         private readonly Dictionary<string, List<Action<string>>> uploadWaiters = new Dictionary<string, List<Action<string>>>();

@@ -254,6 +254,25 @@ namespace SprayMod
                 manifest.sprays.Add(new SpraySpec { name = string.Empty, url = url });
                 SprayConfigManager.SaveManifest(manifest);
                 SprayManager.Instance?.LoadLibrary(_ => { if (_visible) Rebuild(); });
+
+                // A link too long for chat can't be shared as-is - auto re-host it to a short,
+                // permanent URL and save that back into the list (matched by its current URL).
+                if (!SprayChatSync.UrlFitsInChat(url))
+                {
+                    SprayManager.Instance?.ShortenLink(url, newUrl =>
+                    {
+                        if (string.IsNullOrEmpty(newUrl)) return;
+                        var m = SprayConfigManager.LoadManifest();
+                        bool changed = false;
+                        foreach (var s in m.sprays)
+                            if (s.IsUrl && string.Equals(s.url, url, StringComparison.OrdinalIgnoreCase)) { s.url = newUrl; changed = true; }
+                        if (changed)
+                        {
+                            SprayConfigManager.SaveManifest(m);
+                            SprayManager.Instance?.LoadLibrary(_ => { if (_visible) Rebuild(); });
+                        }
+                    });
+                }
             }
             catch (Exception e)
             {
