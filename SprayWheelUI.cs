@@ -65,6 +65,7 @@ namespace SprayMod
         {
             if (!_visible) return;
             _visible = false;
+            CloseAddLinkPrompt();
             if (_overlay != null) _overlay.style.display = DisplayStyle.None;
             _animItems.Clear();
             SprayUtilities.SetGameMouseActive(_prevMouseActive);
@@ -161,17 +162,103 @@ namespace SprayMod
             }
 
             // Action bar - a row BELOW the wheel (sibling in the overlay column) so it never
-            // overlaps the radial items. Spans the wheel width so the buttons centre under it.
+            // overlaps the radial items. Sized to content and centred by the overlay; wraps to a
+            // second row if the buttons are wider than the wheel (small libraries).
             var bar = new VisualElement();
-            bar.style.width = wheelDim;
+            bar.style.maxWidth = Mathf.Max(wheelDim, 480f);
             bar.style.flexDirection = FlexDirection.Row;
+            bar.style.flexWrap = Wrap.Wrap;
             bar.style.justifyContent = Justify.Center;
             bar.style.alignItems = Align.Center;
             bar.style.marginTop = 14f;
             bar.style.flexShrink = 0;
+            bar.Add(MakeButton("ADD LINK", ShowAddLinkPrompt));
             bar.Add(MakeButton("CLEAR ALL", () => { _onClear?.Invoke(); Hide(); }));
             bar.Add(MakeButton("CLOSE", Hide));
             _overlay.Add(bar);
+        }
+
+        // ---- add-link prompt (paste an image URL straight from the wheel) ----
+
+        private VisualElement _addLinkPrompt;
+
+        /// <summary>Shows a small centred panel to paste an image URL and add it to the library.</summary>
+        private void ShowAddLinkPrompt()
+        {
+            if (_overlay == null) return;
+            CloseAddLinkPrompt();
+
+            var prompt = new VisualElement { name = "AddLinkPrompt" };
+            prompt.style.position = Position.Absolute;
+            prompt.style.left = new Length(50, LengthUnit.Percent);
+            prompt.style.top = new Length(50, LengthUnit.Percent);
+            prompt.style.translate = new Translate(new Length(-50, LengthUnit.Percent), new Length(-50, LengthUnit.Percent), 0);
+            prompt.style.width = 460;
+            prompt.style.paddingLeft = 16; prompt.style.paddingRight = 16;
+            prompt.style.paddingTop = 14; prompt.style.paddingBottom = 14;
+            prompt.style.backgroundColor = CenterBg;
+            prompt.style.flexDirection = FlexDirection.Column;
+            Round(prompt, 10f);
+            SetBorder(prompt, 2f, Accent);
+            prompt.RegisterCallback<ClickEvent>(evt => evt.StopPropagation()); // clicking the panel must not close the wheel
+
+            prompt.Add(MakeLabel("PASTE IMAGE LINK", 16, TextCol, true));
+            var hint = MakeLabel("Direct image URL ending in .png / .jpg / .gif — not a gallery page or video.", 11, SubTextCol, false);
+            hint.style.whiteSpace = WhiteSpace.Normal;
+            hint.style.marginTop = 4; hint.style.marginBottom = 8;
+            prompt.Add(hint);
+
+            var field = new TextField { name = "AddLinkField" };
+            field.style.marginBottom = 10;
+            field.style.minHeight = 28;
+            prompt.Add(field);
+
+            var btnRow = new VisualElement();
+            btnRow.style.flexDirection = FlexDirection.Row;
+            btnRow.style.justifyContent = Justify.Center;
+            btnRow.Add(MakeButton("ADD", () =>
+            {
+                string url = (field.value ?? string.Empty).Trim();
+                if (url.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
+                    url.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+                {
+                    AddLinkSpray(url);
+                    CloseAddLinkPrompt();
+                }
+                else
+                {
+                    hint.text = "That isn't a valid http(s) link. Paste a full image URL.";
+                }
+            }));
+            btnRow.Add(MakeButton("CANCEL", CloseAddLinkPrompt));
+            prompt.Add(btnRow);
+
+            _overlay.Add(prompt);
+            _addLinkPrompt = prompt;
+            prompt.BringToFront();
+            field.Focus();
+        }
+
+        private void CloseAddLinkPrompt()
+        {
+            _addLinkPrompt?.RemoveFromHierarchy();
+            _addLinkPrompt = null;
+        }
+
+        /// <summary>Appends a URL spray to the manifest, reloads the library, then rebuilds the wheel.</summary>
+        private void AddLinkSpray(string url)
+        {
+            try
+            {
+                var manifest = SprayConfigManager.LoadManifest();
+                manifest.sprays.Add(new SpraySpec { name = string.Empty, url = url });
+                SprayConfigManager.SaveManifest(manifest);
+                SprayManager.Instance?.LoadLibrary(_ => { if (_visible) Rebuild(); });
+            }
+            catch (Exception e)
+            {
+                Debug.LogError($"[SprayMod] Add link from wheel failed: {e.Message}");
+            }
         }
 
         private VisualElement MakeItem(SprayLibraryEntry entry, int index, float x, float y)
