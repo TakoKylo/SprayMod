@@ -134,7 +134,17 @@ namespace SprayMod
             else
                 ShowUI();
         }
-        
+
+        /// <summary>Opens the settings panel directly on the Sprays tab (used by the wheel's ADD LINK).</summary>
+        public void OpenToSpraysTab()
+        {
+            if (_panel == null) CreateUI();
+            _activeTab = SprayTab.Sprays;
+            UpdateTabStyles();
+            if (_isVisible) RefreshUI();
+            else ShowUI();
+        }
+
         private void ShowUI()
         {
             if (_panel == null)

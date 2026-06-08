@@ -113,7 +113,14 @@ namespace SprayMod
             sprayWheel = wheelObject.AddComponent<SprayWheelUI>();
             sprayWheel.Configure(
                 onSelect: PerformSpray,
-                onClear: ClearLocalSprays);
+                onClear: ClearLocalSprays,
+                onAddLink: OpenSpraySettingsLinks);
+        }
+
+        /// <summary>Opens the settings panel on the Sprays tab (where links are added/managed).</summary>
+        private void OpenSpraySettingsLinks()
+        {
+            settingsUI?.OpenToSpraysTab();
         }
 
         private void CreateSettingsUI()

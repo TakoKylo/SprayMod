@@ -33,15 +33,17 @@ namespace SprayMod
 
         private Action<int> _onSelect;
         private Action _onClear;
+        private Action _onAddLink;
 
         // Animated-thumbnail playback state
         private class AnimItem { public VisualElement Element; public SprayLibraryEntry Entry; public int Frame; public float Timer; }
         private readonly List<AnimItem> _animItems = new List<AnimItem>();
 
-        public void Configure(Action<int> onSelect, Action onClear)
+        public void Configure(Action<int> onSelect, Action onClear, Action onAddLink)
         {
             _onSelect = onSelect;
             _onClear = onClear;
+            _onAddLink = onAddLink;
         }
 
         public bool IsVisible() => _visible;
@@ -65,7 +67,6 @@ namespace SprayMod
         {
             if (!_visible) return;
             _visible = false;
-            CloseAddLinkPrompt();
             if (_overlay != null) _overlay.style.display = DisplayStyle.None;
             _animItems.Clear();
             SprayUtilities.SetGameMouseActive(_prevMouseActive);
@@ -191,157 +192,14 @@ namespace SprayMod
             bar.style.translate = new Translate(new Length(-50, LengthUnit.Percent), 0, 0);
             bar.style.flexDirection = FlexDirection.Row;
             bar.style.alignItems = Align.Center;
-            bar.Add(MakeButton("ADD LINK", ShowAddLinkPrompt));
+            bar.Add(MakeButton("ADD LINK", () => { Hide(); _onAddLink?.Invoke(); }));
             bar.Add(MakeButton("CLEAR ALL", () => { _onClear?.Invoke(); Hide(); }));
             bar.Add(MakeButton("CLOSE", Hide));
             content.Add(bar);
         }
 
-        // ---- add-link prompt (paste an image URL straight from the wheel) ----
-
-        private VisualElement _addLinkPrompt;
-
-        /// <summary>Shows a small centred panel to paste an image URL and add it to the library.</summary>
-        private void ShowAddLinkPrompt()
-        {
-            if (_overlay == null) return;
-            CloseAddLinkPrompt();
-
-            var prompt = new VisualElement { name = "AddLinkPrompt" };
-            prompt.style.position = Position.Absolute;
-            prompt.style.left = new Length(50, LengthUnit.Percent);
-            prompt.style.top = new Length(50, LengthUnit.Percent);
-            prompt.style.translate = new Translate(new Length(-50, LengthUnit.Percent), new Length(-50, LengthUnit.Percent), 0);
-            prompt.style.width = 460;
-            prompt.style.paddingLeft = 16; prompt.style.paddingRight = 16;
-            prompt.style.paddingTop = 14; prompt.style.paddingBottom = 14;
-            prompt.style.backgroundColor = CenterBg;
-            prompt.style.flexDirection = FlexDirection.Column;
-            Round(prompt, 10f);
-            SetBorder(prompt, 2f, Accent);
-            prompt.RegisterCallback<ClickEvent>(evt => evt.StopPropagation()); // clicking the panel must not close the wheel
-
-            prompt.Add(MakeLabel("PASTE IMAGE LINK", 16, TextCol, true));
-            var hint = MakeLabel("Direct image URL ending in .png / .jpg / .gif — not a gallery page or video.", 11, SubTextCol, false);
-            hint.style.whiteSpace = WhiteSpace.Normal;
-            hint.style.marginTop = 4; hint.style.marginBottom = 8;
-            prompt.Add(hint);
-
-            var linkLabel = MakeLabel("IMAGE LINK", 11, SubTextCol, true);
-            linkLabel.style.unityTextAlign = TextAnchor.MiddleLeft;
-            linkLabel.style.marginBottom = 2;
-            prompt.Add(linkLabel);
-            var urlField = MakeInput("AddLinkUrl");
-            prompt.Add(urlField);
-
-            var nameLabel = MakeLabel("NAME (OPTIONAL)", 11, SubTextCol, true);
-            nameLabel.style.unityTextAlign = TextAnchor.MiddleLeft;
-            nameLabel.style.marginTop = 4; nameLabel.style.marginBottom = 2;
-            prompt.Add(nameLabel);
-            var nameField = MakeInput("AddLinkName");
-            nameField.style.marginBottom = 12;
-            prompt.Add(nameField);
-
-            void Submit()
-            {
-                string url = (urlField.value ?? string.Empty).Trim();
-                if (url.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
-                    url.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
-                {
-                    AddLinkSpray(url, (nameField.value ?? string.Empty).Trim());
-                    CloseAddLinkPrompt();
-                }
-                else
-                {
-                    hint.text = "That isn't a valid http(s) link — paste a full image URL.";
-                    hint.style.color = new Color(0.92f, 0.5f, 0.5f);
-                }
-            }
-
-            // Enter in either field submits.
-            urlField.RegisterCallback<KeyDownEvent>(e => { if (e.keyCode == KeyCode.Return || e.keyCode == KeyCode.KeypadEnter) Submit(); });
-            nameField.RegisterCallback<KeyDownEvent>(e => { if (e.keyCode == KeyCode.Return || e.keyCode == KeyCode.KeypadEnter) Submit(); });
-
-            var btnRow = new VisualElement();
-            btnRow.style.flexDirection = FlexDirection.Row;
-            btnRow.style.justifyContent = Justify.Center;
-            btnRow.Add(MakeButton("ADD", Submit));
-            btnRow.Add(MakeButton("CANCEL", CloseAddLinkPrompt));
-            prompt.Add(btnRow);
-
-            _overlay.Add(prompt);
-            _addLinkPrompt = prompt;
-            prompt.BringToFront();
-            urlField.Focus();
-        }
-
-        /// <summary>A clearly-styled single-line text input (visible dark box + accent border).</summary>
-        private TextField MakeInput(string name)
-        {
-            var tf = new TextField { name = name };
-            tf.style.height = 32;
-            tf.style.marginBottom = 6;
-            tf.style.fontSize = 14;
-            tf.style.color = TextCol;
-            tf.RegisterCallback<AttachToPanelEvent>(_ =>
-            {
-                var input = tf.Q("unity-text-input");
-                if (input == null) return;
-                input.style.backgroundColor = new Color(0.16f, 0.16f, 0.18f);
-                input.style.color = TextCol;
-                input.style.fontSize = 14;
-                input.style.paddingLeft = 8; input.style.paddingRight = 8;
-                input.style.borderTopWidth = 1; input.style.borderBottomWidth = 1;
-                input.style.borderLeftWidth = 1; input.style.borderRightWidth = 1;
-                var bc = new Color(0.45f, 0.6f, 0.9f);
-                input.style.borderTopColor = bc; input.style.borderBottomColor = bc;
-                input.style.borderLeftColor = bc; input.style.borderRightColor = bc;
-                input.style.borderTopLeftRadius = 6; input.style.borderTopRightRadius = 6;
-                input.style.borderBottomLeftRadius = 6; input.style.borderBottomRightRadius = 6;
-            });
-            return tf;
-        }
-
-        private void CloseAddLinkPrompt()
-        {
-            _addLinkPrompt?.RemoveFromHierarchy();
-            _addLinkPrompt = null;
-        }
-
-        /// <summary>Appends a named URL spray to the manifest, reloads the library, then rebuilds the wheel.</summary>
-        private void AddLinkSpray(string url, string name)
-        {
-            try
-            {
-                var manifest = SprayConfigManager.LoadManifest();
-                manifest.sprays.Add(new SpraySpec { name = name ?? string.Empty, url = url });
-                SprayConfigManager.SaveManifest(manifest);
-                SprayManager.Instance?.LoadLibrary(_ => { if (_visible) Rebuild(); });
-
-                // Auto re-host any non-catbox link to a short, permanent URL and save it back into
-                // the list (matched by its current URL), so stored links stay clean and shareable.
-                if (!SprayManager.IsHostedShortLink(url))
-                {
-                    SprayManager.Instance?.ShortenLink(url, (newUrl, error) =>
-                    {
-                        if (string.IsNullOrEmpty(newUrl)) return;
-                        var m = SprayConfigManager.LoadManifest();
-                        bool changed = false;
-                        foreach (var s in m.sprays)
-                            if (s.IsUrl && string.Equals(s.url, url, StringComparison.OrdinalIgnoreCase)) { s.url = newUrl; changed = true; }
-                        if (changed)
-                        {
-                            SprayConfigManager.SaveManifest(m);
-                            SprayManager.Instance?.LoadLibrary(_ => { if (_visible) Rebuild(); });
-                        }
-                    });
-                }
-            }
-            catch (Exception e)
-            {
-                Debug.LogError($"[SprayMod] Add link from wheel failed: {e.Message}");
-            }
-        }
+        // Add-link is handled by the settings UI's Sprays tab now (opened via the ADD LINK button's
+        // _onAddLink callback), so there's a single place to manage links.
 
         private VisualElement MakeItem(SprayLibraryEntry entry, int index, float x, float y)
         {
