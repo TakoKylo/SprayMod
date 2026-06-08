@@ -30,6 +30,12 @@ namespace SprayMod
         private float frameTimer = 0f;
         private bool isAnimated = false;
 
+        // Lifetime fade-out (deterministic + shader-independent).
+        private bool _fading;
+        private float _fadeStartTime;
+        private float _baseAlpha = 1f;
+        private const float FADE_DURATION = 1.0f;
+
         private const float DECAL_SIZE = 2.0f; // Was 2.0 - reduced to normal size
         private const float DECAL_OFFSET = 0.05f; // Larger offset from surface
 
@@ -175,6 +181,7 @@ namespace SprayMod
             }
             
             // Set color with opacity applied
+            _baseAlpha = opacity;
             decalMaterial.color = new Color(1f, 1f, 1f, opacity);
             
             renderer.material = decalMaterial;
@@ -223,7 +230,8 @@ namespace SprayMod
         {
             if (decalObject != null)
                 decalObject.transform.localScale = Vector3.one * scale * DECAL_SIZE;
-            if (decalMaterial != null)
+            _baseAlpha = opacity;
+            if (decalMaterial != null && !_fading)
             {
                 Color c = decalMaterial.color;
                 c.a = opacity;
@@ -253,34 +261,35 @@ namespace SprayMod
                 }
             }
             
-            // Handle lifetime expiration
-            if (LifeTime > 0 && Time.time - creationTime >= LifeTime)
-            {
+            // Start the fade once the lifetime elapses.
+            if (LifeTime > 0 && !_fading && Time.time - creationTime >= LifeTime)
                 FadeAndDestroy();
+
+            // Deterministic, frame-rate-independent fade; always destroys after FADE_DURATION even
+            // if the shader has no tint colour (then it just disappears at the end instead of fading).
+            if (_fading)
+            {
+                float t = (Time.time - _fadeStartTime) / FADE_DURATION;
+                if (t >= 1f)
+                {
+                    Destroy(gameObject);
+                    return;
+                }
+                if (decalMaterial != null)
+                {
+                    Color c = decalMaterial.color;
+                    c.a = Mathf.Lerp(_baseAlpha, 0f, t);
+                    decalMaterial.color = c;
+                }
             }
         }
 
-        /// <summary>
-        /// Fade out and destroy the spray
-        /// </summary>
+        /// <summary>Begins a timed fade-out; the spray is destroyed when it completes (see Update).</summary>
         public void FadeAndDestroy(float fadeTime = 1f)
         {
-            if (decalMaterial != null && decalMaterial.HasProperty("_Color"))
-            {
-                // Simple fade out
-                Color color = decalMaterial.color;
-                color.a = Mathf.Lerp(color.a, 0f, Time.deltaTime / fadeTime);
-                decalMaterial.color = color;
-
-                if (color.a <= 0.01f)
-                {
-                    Destroy(gameObject);
-                }
-            }
-            else
-            {
-                Destroy(gameObject);
-            }
+            if (_fading) return;
+            _fading = true;
+            _fadeStartTime = Time.time;
         }
 
         private void OnDestroy()
