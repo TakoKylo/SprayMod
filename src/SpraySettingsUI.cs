@@ -596,7 +596,7 @@ namespace SprayMod
             if (url.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
                 url.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
             {
-                manifest.sprays.Add(new SpraySpec { name = "", url = url });
+                manifest.sprays.Insert(0, new SpraySpec { name = "", url = url }); // newest at the top
                 SprayConfigManager.SaveManifest(manifest);
                 if (_addLinkField != null) _addLinkField.value = "";
                 // The rebuilt row auto-shortens long links itself (see BuildSprayRow), with status.

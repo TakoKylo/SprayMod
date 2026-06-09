@@ -140,7 +140,21 @@ namespace SprayMod
         {
             harmony = new Harmony("com.spraymod.patch");
             SprayChatPatch.SetModInstance(this);
-            harmony.PatchAll();
+
+            // Patch each class independently (instead of PatchAll) so that if a single game method
+            // is renamed/removed in a future update, that one feature degrades but the rest of the
+            // mod - including local spray placement and rendering - still loads.
+            SafePatch(typeof(SprayChatReceivePatch));     // receive + hide P2P spray-sync messages
+            SafePatch(typeof(SprayChatPatch));            // intercept the /spray chat command
+            SafePatch(typeof(SprayPausePatch));           // ESC closes our UI instead of opening pause
+            SafePatch(typeof(SprayChatStartInputPatch));  // block chat (T/Y) while our UI is open
+            SafePatch(typeof(SprayQuickChatPatch));       // block quick-chat while our UI is open
+        }
+
+        private void SafePatch(Type patchClass)
+        {
+            try { harmony.CreateClassProcessor(patchClass).Patch(); }
+            catch (Exception e) { Debug.LogError($"[SprayMod] Patch failed for {patchClass.Name} (feature disabled): {e.Message}"); }
         }
 
         // ---- library ----
