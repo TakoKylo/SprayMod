@@ -15,3 +15,7 @@ memory/
 # Supply your own to build (see libs/README.md).
 libs/*
 !libs/README.md
+
+# Unity project used to build the decal shader bundle (we keep the built bundle + shader source
+# under decal/, not the whole editor project).
+decal/Universal*/

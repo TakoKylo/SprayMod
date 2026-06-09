@@ -33,6 +33,12 @@
       <Link>SpraySound.wav</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
+    <!-- Custom screen-space decal shader bundle (surface decals are the default; falls back to flat
+         quads if absent). Built separately in Unity - see decal/README.md. -->
+    <None Include="decal\spraymod_decals">
+      <Link>spraymod_decals</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
   </ItemGroup>
 
   <!-- Completely exclude reference folders from the project -->
@@ -91,8 +97,9 @@
     <Copy SourceFiles="$(OutputPath)SprayMod.pdb" DestinationFolder="$(PluginsPath)" SkipUnchangedFiles="true" Condition="Exists('$(OutputPath)SprayMod.pdb')" />
     <Copy SourceFiles="$(MSBuildProjectDirectory)\config\default_sprays.json" DestinationFolder="$(PluginsPath)" SkipUnchangedFiles="true" />
     <Copy SourceFiles="$(MSBuildProjectDirectory)\assets\SpraySound.wav" DestinationFolder="$(PluginsPath)" SkipUnchangedFiles="true" Condition="Exists('$(MSBuildProjectDirectory)\assets\SpraySound.wav')" />
+    <Copy SourceFiles="$(MSBuildProjectDirectory)\decal\spraymod_decals" DestinationFolder="$(PluginsPath)" SkipUnchangedFiles="true" Condition="Exists('$(MSBuildProjectDirectory)\decal\spraymod_decals')" />
 
-    <Message Text="Shipped SprayMod (DLL + default_sprays.json + sound) to: $(PluginsPath)" Importance="high" />
+    <Message Text="Shipped SprayMod (DLL + default_sprays.json + sound + decal bundle) to: $(PluginsPath)" Importance="high" />
   </Target>
 
 </Project>

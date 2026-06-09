@@ -266,23 +266,24 @@ namespace SprayMod
             lastLocalSprayTime = Time.time;
 
             Vector3 normal = hit.normal;
+            Vector3 up = GetLocalCameraUp(); // orient the spray to our view; broadcast so others match
             float scale = clientConfig?.SpraySize ?? 1f; // sent over the wire (informational; receivers use their own size)
             string steamId = GetLocalSteamId();
 
-            SpawnDecal(steamId, entry, hit.point, normal);
+            SpawnDecal(steamId, entry, hit.point, normal, up);
 
             // Share placement if enabled and connected to a server.
             bool connected = NetworkManager.Singleton != null && NetworkManager.Singleton.IsConnectedClient;
             if (connected && (clientConfig == null || clientConfig.ShareSprays))
             {
-                Vector3 p = hit.point, n = normal;
+                Vector3 p = hit.point, n = normal, u = up;
                 float s = scale;
                 bool autoUpload = clientConfig == null || clientConfig.AutoUpload;
 
                 if (entry.IsUrl && SprayChatSync.UrlFitsInChat(entry.Url))
                 {
                     // Short link: broadcast it directly.
-                    SprayChatSync.Instance?.SendSprayUrl(entry.Url, p, n, s);
+                    SprayChatSync.Instance?.SendSprayUrl(entry.Url, p, n, s, u);
                 }
                 else if (autoUpload)
                 {
@@ -291,22 +292,34 @@ namespace SprayMod
                     GetSprayUrl(entry, url =>
                     {
                         if (!string.IsNullOrEmpty(url) && SprayChatSync.UrlFitsInChat(url))
-                            SprayChatSync.Instance?.SendSprayUrl(url, p, n, s);
+                            SprayChatSync.Instance?.SendSprayUrl(url, p, n, s, u);
                         else if (!entry.IsUrl)
-                            SprayChatSync.Instance?.SendSprayHash(entry.Hash, p, n, s); // file fallback
+                            SprayChatSync.Instance?.SendSprayHash(entry.Hash, p, n, s, u); // file fallback
                     });
                 }
                 else if (entry.IsUrl)
                 {
                     // Auto-upload off: try the link directly (dropped if too long for chat).
-                    SprayChatSync.Instance?.SendSprayUrl(entry.Url, p, n, s);
+                    SprayChatSync.Instance?.SendSprayUrl(entry.Url, p, n, s, u);
                 }
                 else
                 {
                     // Auto-upload off: reference-only - only players with the same file see it.
-                    SprayChatSync.Instance?.SendSprayHash(entry.Hash, p, n, s);
+                    SprayChatSync.Instance?.SendSprayHash(entry.Hash, p, n, s, u);
                 }
             }
+        }
+
+        /// <summary>The local player's camera up (used to orient our sprays); world up if unavailable.</summary>
+        private static Vector3 GetLocalCameraUp()
+        {
+            try
+            {
+                var cam = GetLocalPlayer()?.PlayerCamera;
+                if (cam != null) return cam.transform.up;
+            }
+            catch { }
+            return Vector3.up;
         }
 
         // ---- auto-upload (so file sprays are visible to everyone) ----
@@ -547,7 +560,7 @@ namespace SprayMod
         /// URL sprays are downloaded (and cached); hash sprays are matched against the
         /// local library, falling back to a placeholder when we don't have the image.
         /// </summary>
-        public void RemoteSpray(string steamId, bool isUrl, string reference, Vector3 position, Vector3 normal, float scale)
+        public void RemoteSpray(string steamId, bool isUrl, string reference, Vector3 position, Vector3 normal, float scale, Vector3 up)
         {
             if (clientConfig != null && !clientConfig.ShowOtherPlayerSprays) return;
             // Friends-only filter: ignore sprays from non-friends unless the player opted into "everyone".
@@ -558,16 +571,16 @@ namespace SprayMod
                 if (clientConfig != null && !clientConfig.DownloadSharedUrls) return;
                 EnsureUrlSpray(reference, reference, entry =>
                 {
-                    if (entry != null) SpawnDecal(steamId, entry, position, normal);
+                    if (entry != null) SpawnDecal(steamId, entry, position, normal, up);
                 });
             }
             else if (Library.TryGetByHash(reference, out SprayLibraryEntry entry))
             {
-                SpawnDecal(steamId, entry, position, normal);
+                SpawnDecal(steamId, entry, position, normal, up);
             }
             else
             {
-                SpawnDecalTexture(steamId, placeholderTexture, null, null, position, normal);
+                SpawnDecalTexture(steamId, placeholderTexture, null, null, position, normal, up);
             }
         }
 
@@ -752,15 +765,15 @@ namespace SprayMod
             return Physics.Raycast(origin, direction, out hit, SprayConfig.MAX_SPRAY_DISTANCE, layerMask);
         }
 
-        private void SpawnDecal(string steamId, SprayLibraryEntry entry, Vector3 position, Vector3 normal)
+        private void SpawnDecal(string steamId, SprayLibraryEntry entry, Vector3 position, Vector3 normal, Vector3 up)
         {
             List<Texture2D> frames = entry.IsAnimated ? entry.Frames : null;
             List<float> delays = entry.IsAnimated ? entry.Delays : null;
-            SpawnDecalTexture(steamId, entry.Thumbnail, frames, delays, position, normal);
+            SpawnDecalTexture(steamId, entry.Thumbnail, frames, delays, position, normal, up);
         }
 
         private void SpawnDecalTexture(string steamId, Texture2D texture, List<Texture2D> frames, List<float> delays,
-            Vector3 position, Vector3 normal)
+            Vector3 position, Vector3 normal, Vector3 up)
         {
             if (texture == null) texture = placeholderTexture;
 
@@ -769,7 +782,7 @@ namespace SprayMod
             float opacity = clientConfig?.SprayOpacity ?? 1f;
             float displayScale = clientConfig?.SpraySize ?? 1f;
             Quaternion rotation = Quaternion.LookRotation(-normal);
-            var data = new SprayData(steamId, position, rotation, normal, 0, displayScale, opacity);
+            var data = new SprayData(steamId, position, rotation, normal, 0, displayScale, opacity) { Up = up };
 
             var sprayObj = new GameObject($"Spray_{data.SprayId}");
             sprayObj.transform.SetParent(sprayContainer);

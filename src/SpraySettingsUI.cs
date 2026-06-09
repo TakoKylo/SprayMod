@@ -497,13 +497,15 @@ namespace SprayMod
             AddToggleRow("Show Other Players' Sprays", _config.ShowOtherPlayerSprays, v => { _config.ShowOtherPlayerSprays = v; SaveConfig(); });
             AddToggleRow("Only Show Friends' Sprays", _config.FriendsOnly, v => { _config.FriendsOnly = v; SaveConfig(); });
             AddToggleRow("Debug Logging", _config.Debug, v => { _config.Debug = v; SaveConfig(); });
+            AddToggleRow("Flat Sprays (classic, no surface projection)", _config.FlatDecals, v => { _config.FlatDecals = v; SaveConfig(); });
 
             // Size & opacity are local and apply to ALL sprays (yours + others'), live.
             AddSliderRow("Spray Opacity", _config.SprayOpacity, 0f, 1f, v =>
             {
                 _config.SprayOpacity = v;
                 SprayManager.Instance?.ApplyDisplaySettings(_config.SpraySize, v);
-            }); // saved on close
+                SaveConfig();
+            });
             AddSliderRow("Spray Size", _config.SpraySize, 0.1f, 3f, v =>
             {
                 _config.SpraySize = v;

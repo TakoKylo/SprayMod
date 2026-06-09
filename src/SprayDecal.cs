@@ -67,13 +67,49 @@ namespace SprayMod
         /// </summary>
         private void CreateDecalVisuals(SprayData data, Texture2D texture)
         {
-            // Position slightly offset from the surface to avoid z-fighting
-            transform.position = data.Position + data.Normal * DECAL_OFFSET;
-            transform.rotation = Quaternion.LookRotation(-data.Normal);
+            // Orient the spray to the placer's view (upright from their perspective): their camera up,
+            // synced over the network (SprayData.Up) so it looks the same to everyone.
+            Vector3 up = SafeUp(data.Normal, data.Up);
 
-            // Projectors don't work well in VR - skip to quad
-            // Always use quad-based decal for visibility
+            // Position slightly offset from the surface to avoid z-fighting. Face the viewer (+normal)
+            // so the flat quad shows its FRONT (un-mirrored); the screen-space decal overrides this
+            // rotation in SprayScreenDecal.TryCreate.
+            transform.position = data.Position + data.Normal * DECAL_OFFSET;
+            transform.rotation = Quaternion.LookRotation(data.Normal, up);
+
+            // Surface decals are the DEFAULT: a screen-space (depth-buffer) projection that conforms to
+            // the rendered surface (needs the shader bundle). The classic flat quad is opt-in via
+            // FlatDecals, and is also the automatic fallback when the bundle isn't present.
+            bool flat = SprayManager.Instance != null && SprayManager.Instance.Config != null
+                        && SprayManager.Instance.Config.FlatDecals;
+            if (!flat && SprayScreenDecal.TryCreate(gameObject, texture, data.Position, data.Normal,
+                    up, data.Scale * DECAL_SIZE, data.Opacity, out var screenMat))
+            {
+                decalMaterial = screenMat;   // Update() animates GIF frames / fade via this material
+                _baseAlpha = data.Opacity;
+                return;
+            }
+
+            // Classic flat quad (works in any pipeline; used when FlatDecals is on or no bundle).
             CreateQuadDecal(texture, data.Scale, data.Opacity);
+        }
+
+        /// <summary>
+        /// Keeps the up reference from being (near-)parallel to the normal - LookRotation(normal, up)
+        /// is degenerate then (e.g. world-up on a floor). Falls back to a deterministic perpendicular,
+        /// so it's stable and consistent across clients.
+        /// </summary>
+        private static Vector3 SafeUp(Vector3 normal, Vector3 desiredUp)
+        {
+            Vector3 n = normal.sqrMagnitude > 1e-6f ? normal.normalized : Vector3.up;
+            Vector3 u = desiredUp.sqrMagnitude > 1e-6f ? desiredUp.normalized : Vector3.up;
+            if (Mathf.Abs(Vector3.Dot(u, n)) > 0.98f)
+            {
+                Vector3 t = Vector3.Cross(n, Vector3.up);
+                if (t.sqrMagnitude < 1e-6f) t = Vector3.Cross(n, Vector3.forward);
+                u = t.normalized;
+            }
+            return u;
         }
 
         /// <summary>

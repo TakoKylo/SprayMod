@@ -57,6 +57,9 @@ namespace SprayMod
         [Description("Keybind to clear ALL sprays on your client (yours and others'); empty = unbound")]
         public string ClearSpraysKey { get; set; } = "";
 
+        [Description("Use the classic FLAT spray style instead of projecting the spray onto surfaces (off = surface decals, the default, when the shader bundle is present)")]
+        public bool FlatDecals { get; set; } = false;
+
         [Description("Quick spray keybinds - maps a key to a spray name (survives reordering)")]
         public Dictionary<string, string> QuickSprayBinds { get; set; } = new Dictionary<string, string>();
     }

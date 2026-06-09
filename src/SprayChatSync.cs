@@ -46,16 +46,16 @@ namespace SprayMod
             if (Instance == this) Instance = null;
         }
 
-        public void SendSprayUrl(string url, Vector3 pos, Vector3 normal, float scale)
+        public void SendSprayUrl(string url, Vector3 pos, Vector3 normal, float scale, Vector3 up)
         {
             if (string.IsNullOrEmpty(url)) return;
-            Send(BuildContent('u', url, pos, normal, scale));
+            Send(BuildContent('u', url, pos, normal, scale, up));
         }
 
-        public void SendSprayHash(string hash, Vector3 pos, Vector3 normal, float scale)
+        public void SendSprayHash(string hash, Vector3 pos, Vector3 normal, float scale, Vector3 up)
         {
             if (string.IsNullOrEmpty(hash)) return;
-            Send(BuildContent('h', hash, pos, normal, scale));
+            Send(BuildContent('h', hash, pos, normal, scale, up));
         }
 
         private void Send(string content)
@@ -95,10 +95,10 @@ namespace SprayMod
                 if (!string.IsNullOrEmpty(senderSteamId) && senderSteamId == SprayManager.GetLocalSteamId())
                     return;
 
-                if (!TryDecode(content, out bool isUrl, out string reference, out Vector3 pos, out Vector3 normal, out float scale))
+                if (!TryDecode(content, out bool isUrl, out string reference, out Vector3 pos, out Vector3 normal, out float scale, out Vector3 up))
                     return;
 
-                SprayManager.Instance?.RemoteSpray(senderSteamId ?? string.Empty, isUrl, reference, pos, normal, scale);
+                SprayManager.Instance?.RemoteSpray(senderSteamId ?? string.Empty, isUrl, reference, pos, normal, scale, up);
             }
             catch (Exception e)
             {
@@ -118,9 +118,9 @@ namespace SprayMod
 
         // ---- encoding ----
 
-        private static string BuildContent(char type, string payload, Vector3 pos, Vector3 normal, float scale)
+        private static string BuildContent(char type, string payload, Vector3 pos, Vector3 normal, float scale, Vector3 up)
         {
-            string b64 = Convert.ToBase64String(EncodePlacement(pos, normal, scale));
+            string b64 = Convert.ToBase64String(EncodePlacement(pos, normal, scale, up));
             return MARKER + b64 + type + payload;
         }
 
@@ -131,9 +131,9 @@ namespace SprayMod
             return MARKER.Length + B64_LEN + 1 + url.Length <= 128;
         }
 
-        public static bool TryDecode(string content, out bool isUrl, out string reference, out Vector3 pos, out Vector3 normal, out float scale)
+        public static bool TryDecode(string content, out bool isUrl, out string reference, out Vector3 pos, out Vector3 normal, out float scale, out Vector3 up)
         {
-            isUrl = false; reference = null; pos = Vector3.zero; normal = Vector3.up; scale = 1f;
+            isUrl = false; reference = null; pos = Vector3.zero; normal = Vector3.up; scale = 1f; up = Vector3.up;
             if (string.IsNullOrEmpty(content)) return false;
 
             // Locate the marker ANYWHERE in the message - some servers/mods colour-wrap or prefix
@@ -160,13 +160,15 @@ namespace SprayMod
             if (string.IsNullOrEmpty(reference)) return false;
             isUrl = type == 'u';
 
-            DecodePlacement(placement, out pos, out normal, out scale);
+            DecodePlacement(placement, out pos, out normal, out scale, out up);
             return true;
         }
 
-        private static byte[] EncodePlacement(Vector3 pos, Vector3 normal, float scale)
+        // 11th byte = decal roll around the normal so the spray is oriented the same for everyone (see
+        // EncodeRoll). It's optional: older 10-byte messages decode with no roll (up defaults to world up).
+        private static byte[] EncodePlacement(Vector3 pos, Vector3 normal, float scale, Vector3 up)
         {
-            var b = new byte[PLACEMENT_BYTES];
+            var b = new byte[PLACEMENT_BYTES + 1];
             WriteShort(b, 0, (short)Mathf.Clamp(Mathf.RoundToInt(pos.x * 100f), short.MinValue, short.MaxValue));
             WriteShort(b, 2, (short)Mathf.Clamp(Mathf.RoundToInt(pos.y * 100f), short.MinValue, short.MaxValue));
             WriteShort(b, 4, (short)Mathf.Clamp(Mathf.RoundToInt(pos.z * 100f), short.MinValue, short.MaxValue));
@@ -174,16 +176,46 @@ namespace SprayMod
             b[7] = (byte)(sbyte)Mathf.Clamp(Mathf.RoundToInt(normal.y * 127f), -127, 127);
             b[8] = (byte)(sbyte)Mathf.Clamp(Mathf.RoundToInt(normal.z * 127f), -127, 127);
             b[9] = (byte)Mathf.Clamp(Mathf.RoundToInt(Mathf.Clamp(scale, 0f, 3f) / 3f * 255f), 0, 255);
+            b[10] = EncodeRoll(normal, up);
             return b;
         }
 
-        private static void DecodePlacement(byte[] b, out Vector3 pos, out Vector3 normal, out float scale)
+        private static void DecodePlacement(byte[] b, out Vector3 pos, out Vector3 normal, out float scale, out Vector3 up)
         {
             pos = new Vector3(ReadShort(b, 0) / 100f, ReadShort(b, 2) / 100f, ReadShort(b, 4) / 100f);
             normal = new Vector3((sbyte)b[6] / 127f, (sbyte)b[7] / 127f, (sbyte)b[8] / 127f);
             if (normal.sqrMagnitude < 1e-6f) normal = Vector3.up;
             normal.Normalize();
             scale = b[9] / 255f * 3f;
+            up = b.Length > PLACEMENT_BYTES ? DecodeRoll(normal, b[PLACEMENT_BYTES]) : Vector3.up;
+        }
+
+        // ---- decal roll (orientation around the normal), shared by sender and receiver ----
+
+        /// <summary>Deterministic tangent on the surface plane, derived only from the normal.</summary>
+        private static Vector3 RefTangent(Vector3 normal)
+        {
+            Vector3 t = Vector3.Cross(normal, Vector3.up);
+            if (t.sqrMagnitude < 1e-4f) t = Vector3.Cross(normal, Vector3.forward);
+            return t.normalized;
+        }
+
+        /// <summary>Encodes the spray's up (its angle around the normal from the reference tangent) into a byte.</summary>
+        private static byte EncodeRoll(Vector3 normal, Vector3 up)
+        {
+            Vector3 n = normal.normalized;
+            Vector3 r = RefTangent(n);
+            Vector3 upPerp = up - n * Vector3.Dot(up, n);
+            if (upPerp.sqrMagnitude < 1e-6f) upPerp = r;
+            float ang = Vector3.SignedAngle(r, upPerp.normalized, n); // [-180, 180]
+            return (byte)Mathf.Clamp(Mathf.RoundToInt((ang + 180f) / 360f * 255f), 0, 255);
+        }
+
+        /// <summary>Reconstructs the up vector from the roll byte (inverse of EncodeRoll).</summary>
+        private static Vector3 DecodeRoll(Vector3 normal, byte roll)
+        {
+            float ang = roll / 255f * 360f - 180f;
+            return (Quaternion.AngleAxis(ang, normal) * RefTangent(normal)).normalized;
         }
 
         private static void WriteShort(byte[] b, int o, short v) { b[o] = (byte)(v & 0xFF); b[o + 1] = (byte)((v >> 8) & 0xFF); }
