@@ -207,7 +207,7 @@ namespace SprayMod
             bar.style.translate = new Translate(new Length(-50, LengthUnit.Percent), 0, 0);
             bar.style.flexDirection = FlexDirection.Row;
             bar.style.alignItems = Align.Center;
-            bar.Add(MakeButton("ADD LINK", () => { Hide(); _onAddLink?.Invoke(); }));
+            bar.Add(MakeButton("ADD LINK", () => _onAddLink?.Invoke())); // keep the wheel open; settings opens over it
             bar.Add(MakeButton("CLEAR ALL", () => { _onClear?.Invoke(); Hide(); }));
             bar.Add(MakeButton("CLOSE", Hide));
             content.Add(bar);

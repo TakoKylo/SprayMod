@@ -2,6 +2,31 @@ using HarmonyLib;
 
 namespace SprayMod
 {
+    /// <summary>True while any SprayMod overlay (spray wheel or settings panel) is open.</summary>
+    internal static class SprayUiBlock
+    {
+        public static bool AnyOpen => SprayWheelUI.IsWheelOpen || SpraySettingsUI.IsSettingsOpen;
+    }
+
+    /// <summary>
+    /// Block the game's chat input (T / Y) from opening while our UI is up - otherwise you could
+    /// start typing in chat from behind/over the spray menu. The game only gates chat on
+    /// UIState.IsInteracting (a UIView count we can't set), so we suppress it directly.
+    /// </summary>
+    [HarmonyPatch(typeof(UIChat), nameof(UIChat.StartInput))]
+    public static class SprayChatStartInputPatch
+    {
+        static bool Prefix() => !SprayUiBlock.AnyOpen; // false = don't open chat while our UI is open
+    }
+
+    /// <summary>Block quick-chat key actions while our UI is up (same reasoning as chat input).</summary>
+    [HarmonyPatch(typeof(ChatManager), nameof(ChatManager.Client_QuickChatAction))]
+    public static class SprayQuickChatPatch
+    {
+        static bool Prefix() => !SprayUiBlock.AnyOpen;
+    }
+
+
     /// <summary>
     /// While a SprayMod overlay (the spray wheel or the settings panel) is open, ESC should close
     /// OUR UI rather than open the game's pause menu. The game binds ESC to its "Pause" action, which
