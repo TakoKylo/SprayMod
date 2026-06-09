@@ -54,6 +54,9 @@ namespace SprayMod
         [Description("Keybind to open spray wheel (e.g., 'T', 'F5', 'Mouse3')")]
         public string SprayWheelKey { get; set; } = "Z";
 
+        [Description("Keybind to clear ALL sprays on your client (yours and others'); empty = unbound")]
+        public string ClearSpraysKey { get; set; } = "";
+
         [Description("Quick spray keybinds - maps a key to a spray name (survives reordering)")]
         public Dictionary<string, string> QuickSprayBinds { get; set; } = new Dictionary<string, string>();
     }

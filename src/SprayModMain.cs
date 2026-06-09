@@ -113,7 +113,7 @@ namespace SprayMod
             sprayWheel = wheelObject.AddComponent<SprayWheelUI>();
             sprayWheel.Configure(
                 onSelect: PerformSpray,
-                onClear: ClearLocalSprays,
+                onClear: ClearAllSpraysOnClient,
                 onAddLink: OpenSpraySettingsLinks);
         }
 
@@ -133,7 +133,7 @@ namespace SprayMod
         private void CreateInputHandler()
         {
             inputHandler = rootObject.AddComponent<SprayInputHandler>();
-            inputHandler.Initialize(sprayWheel, ExecuteSpray, PerformSpray);
+            inputHandler.Initialize(sprayWheel, ExecuteSpray, PerformSpray, ClearAllSpraysOnClient);
         }
 
         private void RegisterPatches()
@@ -203,9 +203,10 @@ namespace SprayMod
             }
         }
 
-        private void ClearLocalSprays()
+        /// <summary>Clears EVERY spray currently on this client (yours and other players').</summary>
+        private void ClearAllSpraysOnClient()
         {
-            sprayManager?.ClearLocalSprays();
+            sprayManager?.ClearAllSprays();
         }
 
         /// <summary>

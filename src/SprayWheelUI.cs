@@ -48,6 +48,21 @@ namespace SprayMod
 
         public bool IsVisible() => _visible;
 
+        // Lets the pause-action patch tell whether our wheel is the thing ESC should close.
+        public static SprayWheelUI Instance { get; private set; }
+        public static bool IsWheelOpen => Instance != null && Instance._visible;
+
+        private void Awake()
+        {
+            if (Instance == null) Instance = this;
+        }
+
+        /// <summary>Rebuilds the wheel in place if it's currently showing (e.g. after links change).</summary>
+        public void RebuildIfVisible()
+        {
+            if (_visible) Rebuild();
+        }
+
         private bool _prevMouseActive;
 
         public void Show()
@@ -237,11 +252,8 @@ namespace SprayMod
         {
             if (!_visible) return;
 
-            if (Keyboard.current != null && Keyboard.current.escapeKey.wasPressedThisFrame)
-            {
-                Hide();
-                return;
-            }
+            // ESC-to-close is handled by SprayPausePatch (so it also suppresses the game's pause
+            // menu in the same input event), not here.
 
             // Animate GIF thumbnails.
             float dt = Time.unscaledDeltaTime;
@@ -262,6 +274,7 @@ namespace SprayMod
 
         private void OnDestroy()
         {
+            if (Instance == this) Instance = null;
             if (_overlay != null && _overlay.parent != null) _overlay.RemoveFromHierarchy();
             _overlay = null;
         }

@@ -17,16 +17,18 @@ namespace SprayMod
         private SprayWheelUI _sprayWheel;
         private Action _onOpenWheel;
         private Action<int> _onQuickSpray;
+        private Action _onClearAll;
 
         // Track cooldown for key presses
         private float _lastKeyTime = 0f;
         private const float KEY_COOLDOWN = 0.15f;
 
-        public void Initialize(SprayWheelUI wheel, Action openWheelCallback, Action<int> quickSprayCallback)
+        public void Initialize(SprayWheelUI wheel, Action openWheelCallback, Action<int> quickSprayCallback, Action clearAllCallback)
         {
             _sprayWheel = wheel;
             _onOpenWheel = openWheelCallback;
             _onQuickSpray = quickSprayCallback;
+            _onClearAll = clearAllCallback;
             ReloadConfig();
             Debug.Log("[SprayInputHandler] Initialized");
         }
@@ -73,6 +75,16 @@ namespace SprayMod
                 }
             }
             
+            // Check clear-all-sprays key
+            if (!string.IsNullOrEmpty(_config.ClearSpraysKey) && IsKeyPressed(_config.ClearSpraysKey, kb, mouse))
+            {
+                if (_config.Debug)
+                    Debug.Log($"[SprayInputHandler] Clear-all key '{_config.ClearSpraysKey}' pressed");
+                _lastKeyTime = Time.unscaledTime;
+                _onClearAll?.Invoke();
+                return;
+            }
+
             // Check quick spray binds
             if (_config.QuickSprayBinds != null && _config.QuickSprayBinds.Count > 0)
             {
@@ -95,10 +107,14 @@ namespace SprayMod
         {
             try
             {
-                // Don't block when spray wheel is open - we want toggle to work
+                // The settings panel (e.g. opened over the wheel) is a text-entry surface - always
+                // block keybinds so typing a URL doesn't trigger the wheel key / quick sprays.
+                if (SpraySettingsUI.IsSettingsOpen) return true;
+
+                // Don't block when the spray wheel is open - we want the wheel key to toggle it.
                 if (_sprayWheel != null && _sprayWheel.IsVisible())
                     return false;
-                
+
                 // Check if chat is focused (UIChat.IsFocused set by StartInput/StopInput)
                 var uiMgr = MonoBehaviourSingleton<UIManager>.Instance;
                 if (uiMgr != null && uiMgr.Chat != null && uiMgr.Chat.IsFocused) return true;

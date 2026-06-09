@@ -86,11 +86,19 @@ namespace SprayMod
         private static readonly Color32 ChipXBg = new Color32(100, 100, 100, 255);
         private static Font _uiFont;
         
+        // Lets the pause-action patch tell whether the settings panel is the thing ESC should close.
+        public static SpraySettingsUI Instance { get; private set; }
+        public static bool IsSettingsOpen { get; private set; }
+
         private void Awake()
         {
+            if (Instance == null) Instance = this;
             _fiMainSettings = typeof(UIMainMenu).GetField("settingsButton", BindingFlags.Instance | BindingFlags.NonPublic);
             _fiPauseSettings = typeof(UIPauseMenu).GetField("settingsButton", BindingFlags.Instance | BindingFlags.NonPublic);
         }
+
+        /// <summary>Called by SprayPausePatch when ESC is pressed while the panel is open.</summary>
+        public void HandleEscape() => FullCloseUI();
         
         private void Start()
         {
@@ -121,7 +129,8 @@ namespace SprayMod
                 PonceMods.Shared.ModMenuHub.UnregisterMod("SprayMod");
             }
             catch { }
-            
+
+            if (Instance == this) { Instance = null; IsSettingsOpen = false; }
             _panel?.RemoveFromHierarchy();
             _backdrop?.RemoveFromHierarchy();
             _captureOverlay?.RemoveFromHierarchy();
@@ -143,14 +152,23 @@ namespace SprayMod
             UpdateTabStyles();
             if (_isVisible) RefreshUI();
             else ShowUI();
+            // Opened from the spray wheel: keep the wheel open behind us and sit on top of it.
+            _openedFromWheel = true;
+            _backdrop?.BringToFront();
         }
+
+        // True when the panel was opened from the spray wheel (vs the Mod Hub) - changes how it closes.
+        private bool _openedFromWheel;
 
         private void ShowUI()
         {
             if (_panel == null)
                 CreateUI();
-            
+
             if (_panel == null) return;
+
+            _openedFromWheel = false;
+            IsSettingsOpen = true;
 
             // Save cursor state and request mouse mode (b897: drives cursor + suspends input)
             _prevMouseActive = SprayUtilities.GetGameMouseActive();
@@ -179,20 +197,24 @@ namespace SprayMod
         private void HideUI()
         {
             if (_panel == null) return;
-            
+
+            // Opened from the wheel? Just go back to the wheel, don't bounce to the Mod Hub.
+            if (_openedFromWheel) { CloseToWheel(); return; }
+
             // Check if panel is already closed - don't re-open hub if so
             bool wasVisible = _isVisible;
-            
+
             // Save config before closing
             if (wasVisible)
             {
                 SaveConfig();
             }
-            
+
             _panel.style.display = DisplayStyle.None;
             _backdrop.style.display = DisplayStyle.None;
             _isVisible = false;
-            
+            IsSettingsOpen = false;
+
             // Only return to hub if the panel was actually visible
             if (!wasVisible) return;
             
@@ -234,17 +256,21 @@ namespace SprayMod
                 CancelCapture();
                 return;
             }
-            
+
+            // Opened from the wheel? Just go back to the wheel, don't run the hub full-close.
+            if (_openedFromWheel) { CloseToWheel(); return; }
+
             // Save config before closing
             if (_isVisible)
             {
                 SaveConfig();
             }
-            
+
             _panel.style.display = DisplayStyle.None;
             _backdrop.style.display = DisplayStyle.None;
             _isVisible = false;
-            
+            IsSettingsOpen = false;
+
             Debug.Log("[SprayMod] Settings UI fully closed via ESC");
             
             // Use ModMenuHub's FullClose to handle cursor and menu buttons properly
@@ -267,19 +293,27 @@ namespace SprayMod
             }
         }
         
+        /// <summary>
+        /// Closes the panel back to the spray wheel (which stays open behind us and owns the cursor),
+        /// without bouncing to the Mod Hub or restoring gameplay cursor state.
+        /// </summary>
+        private void CloseToWheel()
+        {
+            if (_isVisible) SaveConfig();
+            if (_panel != null) _panel.style.display = DisplayStyle.None;
+            if (_backdrop != null) _backdrop.style.display = DisplayStyle.None;
+            _isVisible = false;
+            IsSettingsOpen = false;
+            _openedFromWheel = false;
+            _savedCursorState = false; // the wheel owns the cursor now; don't restore gameplay state
+            SprayWheelUI.Instance?.RebuildIfVisible();
+        }
+
         private void Update()
         {
-            // Handle ESC key to fully close panel
-            if (_isVisible && !_isCapturing)
-            {
-                var kb = UnityEngine.InputSystem.Keyboard.current;
-                if (kb != null && kb.escapeKey.wasPressedThisFrame)
-                {
-                    FullCloseUI();
-                    return;
-                }
-            }
-            
+            // ESC-to-close is handled by SprayPausePatch (so it also suppresses the game's pause
+            // menu in the same input event), not here.
+
             // Keep cursor unlocked when panel is visible (but not during capture)
             if (_isVisible && !_isCapturing)
             {
@@ -497,6 +531,10 @@ namespace SprayMod
         
         private void BuildSpraysTab()
         {
+            // The manifest (sprays.json) is the source of truth - edits here are written to it
+            // and applied live.
+            var manifest = SprayConfigManager.LoadManifest();
+
             var header = new UITK.Label("YOUR SPRAYS");
             header.style.fontSize = 24;
             header.style.marginBottom = 12;
@@ -504,15 +542,28 @@ namespace SprayMod
             MakeReadable(header);
             _scrollView.Add(header);
 
-            // The manifest (sprays.json) is the source of truth - edits here are written to it
-            // and applied live.
-            var manifest = SprayConfigManager.LoadManifest();
+            // --- Add an image link (at the TOP - it's the main way to add a spray) ---
+            _scrollView.Add(BuildAddLinkRow(manifest));
 
+            var addLinkBtn = MakeButton("ADD IMAGE LINK", () => AddLinkFromField(manifest));
+            addLinkBtn.style.marginTop = 8;
+            _scrollView.Add(addLinkBtn);
+
+            var hint = new UITK.Label("Paste an image/GIF link above and press ADD IMAGE LINK — everyone with the mod can see it. Local image files are optional (others only see them if they have the same file).");
+            hint.style.fontSize = 12;
+            hint.style.color = new Color(0.6f, 0.6f, 0.6f);
+            hint.style.marginTop = 8;
+            hint.style.marginBottom = 16;
+            hint.style.whiteSpace = UITK.WhiteSpace.Normal;
+            ForceUIFont(hint);
+            _scrollView.Add(hint);
+
+            // --- The current spray list ---
             if (manifest.sprays.Count == 0)
             {
-                var none = new UITK.Label("No sprays yet.\n\nDrop .png / .jpg / .gif files in the folder below,\nor paste an image link and press ADD LINK.");
+                var none = new UITK.Label("No sprays yet — paste an image link above, or drop .png / .jpg / .gif files in the local images folder.");
                 none.style.fontSize = 16;
-                none.style.marginTop = 12;
+                none.style.marginTop = 4;
                 none.style.whiteSpace = UITK.WhiteSpace.Normal;
                 MakeReadable(none);
                 _scrollView.Add(none);
@@ -523,14 +574,8 @@ namespace SprayMod
                     _scrollView.Add(BuildSprayRow(manifest, i));
             }
 
-            // Add-image-link control (link-first: this is the main way to add a spray).
-            _scrollView.Add(BuildAddLinkRow(manifest));
-
-            var addLinkBtn = MakeButton("ADD IMAGE LINK", () => AddLinkFromField(manifest));
-            addLinkBtn.style.marginTop = 8;
-            _scrollView.Add(addLinkBtn);
-
             var reloadBtn = MakeButton("RELOAD SPRAYS", ReloadAndRefresh);
+            reloadBtn.style.marginTop = 12;
             _scrollView.Add(reloadBtn);
 
             // Optional: use local image files instead of links (advanced).
@@ -540,14 +585,6 @@ namespace SprayMod
                 catch (Exception e) { Debug.LogError($"[SprayMod] Open folder failed: {e.Message}"); }
             });
             _scrollView.Add(folderBtn);
-
-            var hint = new UITK.Label("Paste an image/GIF link above and press ADD IMAGE LINK — everyone with the mod can see it. Local image files are optional (others only see them if they have the same file).");
-            hint.style.fontSize = 12;
-            hint.style.color = new Color(0.6f, 0.6f, 0.6f);
-            hint.style.marginTop = 8;
-            hint.style.whiteSpace = UITK.WhiteSpace.Normal;
-            ForceUIFont(hint);
-            _scrollView.Add(hint);
         }
 
         private UITK.TextField _addLinkField;
@@ -834,7 +871,10 @@ namespace SprayMod
             
             // Spray wheel key
             AddBindRow("Open Spray Wheel", _config.SprayWheelKey, key => { _config.SprayWheelKey = key; SaveConfig(); });
-            
+
+            // Clear-all-sprays key (clears yours and everyone else's on your client)
+            AddBindRow("Clear All Sprays", _config.ClearSpraysKey, key => { _config.ClearSpraysKey = key; SaveConfig(); });
+
             // Quick spray binds
             var subHeader = new UITK.Label("Quick Spray Binds (direct spray without wheel)");
             subHeader.style.fontSize = 16;
@@ -1292,7 +1332,10 @@ namespace SprayMod
 
             if (_captureLabel != null) _captureLabel.text = "Press a key or combination to bind.\n(ESC to cancel)";
             if (_captureOverlay != null)
+            {
                 _captureOverlay.style.display = DisplayStyle.Flex;
+                _captureOverlay.BringToFront(); // always on top (panel may have been raised over the wheel)
+            }
             StartCoroutine(CaptureChordRoutine());
         }
 
