@@ -17,6 +17,7 @@ namespace SprayMod
     {
         private const float Radius = 185f;
         private const float ItemSize = 96f;
+        private const int PageSize = 12;        // sprays per wheel "page"; arrows beside the hub flip pages
 
         private static readonly Color BgOverlay = new Color(0f, 0f, 0f, 0.82f);
         private static readonly Color ItemBg = new Color(0.20f, 0.20f, 0.22f, 0.96f);
@@ -65,9 +66,12 @@ namespace SprayMod
 
         private bool _prevMouseActive;
 
+        private int _page; // current wheel page (PageSize sprays per page)
+
         public void Show()
         {
             if (!EnsureRoot()) return;
+            _page = 0;
             Rebuild();
             _overlay.style.display = DisplayStyle.Flex;
             _overlay.BringToFront();
@@ -132,14 +136,22 @@ namespace SprayMod
             var entries = SprayManager.Instance != null ? SprayManager.Instance.Library.Entries : null;
             int count = entries?.Count ?? 0;
 
-            // Grow the ring so items never overlap each other: arc spacing >= item size + gap.
-            float radius = Radius;
-            if (count > 1)
-                radius = Mathf.Max(Radius, count * (ItemSize + 16f) / (2f * Mathf.PI));
-
-            float wheelDim = radius * 2f + ItemSize;
             float barGap = 14f;     // space between ring and button bar
             float barHeight = 40f;  // reserved height for the button row
+
+            // Page the library: at most PageSize sprays per wheel, so the ring never outgrows the
+            // screen no matter how big the library is. Arrows beside the hub flip pages.
+            int pageCount = count > 0 ? Mathf.CeilToInt(count / (float)PageSize) : 1;
+            _page = Mathf.Clamp(_page, 0, pageCount - 1);
+            int pageStart = _page * PageSize;
+            int pageItems = Mathf.Max(0, Mathf.Min(PageSize, count - pageStart));
+
+            // Grow the ring so the page's items never overlap: arc spacing >= item size + gap.
+            float radius = Radius;
+            if (pageItems > 1)
+                radius = Mathf.Max(Radius, pageItems * (ItemSize + 16f) / (2f * Mathf.PI));
+
+            float wheelDim = radius * 2f + ItemSize;
 
             // Centre the whole assembly (ring + button bar) with absolute positioning + translate,
             // the same technique the add-link prompt uses (which centres reliably here; flex centring
@@ -176,11 +188,26 @@ namespace SprayMod
             center.Add(MakeLabel("SELECT", 20, TextCol, true));
             center.Add(MakeLabel("SPRAY", 15, SubTextCol, true));
             center.Add(MakeLabel("Click  •  ESC", 11, SubTextCol, false));
+            if (pageCount > 1)
+                center.Add(MakeLabel($"Page {_page + 1} / {pageCount}", 12, Accent, true));
             _wheel.Add(center);
+
+            // Page arrows, left and right of the hub (only when there's more than one page).
+            if (pageCount > 1)
+            {
+                float arrowW = 44f, arrowH = 56f, arrowGap = 14f;
+                var prev = MakeArrowButton("<", () => { _page = (_page - 1 + pageCount) % pageCount; Rebuild(); });
+                Absolute(prev, cx - centerSize / 2f - arrowGap - arrowW, cx - arrowH / 2f);
+                _wheel.Add(prev);
+
+                var next = MakeArrowButton(">", () => { _page = (_page + 1) % pageCount; Rebuild(); });
+                Absolute(next, cx + centerSize / 2f + arrowGap, cx - arrowH / 2f);
+                _wheel.Add(next);
+            }
 
             if (count == 0)
             {
-                var empty = MakeLabel("No sprays found — use Open Folder", 14, SubTextCol, false);
+                var empty = MakeLabel("No sprays found — use ADD SPRAY", 14, SubTextCol, false);
                 Absolute(empty, 0, cx - 10f);
                 empty.style.width = wheelDim;
                 empty.style.unityTextAlign = TextAnchor.MiddleCenter;
@@ -188,12 +215,13 @@ namespace SprayMod
             }
             else
             {
-                for (int i = 0; i < count; i++)
+                for (int j = 0; j < pageItems; j++)
                 {
-                    float angle = (90f - 360f / count * i) * Mathf.Deg2Rad;
+                    int idx = pageStart + j;
+                    float angle = (90f - 360f / pageItems * j) * Mathf.Deg2Rad;
                     float x = cx + Mathf.Cos(angle) * radius - ItemSize / 2f;
                     float y = cx - Mathf.Sin(angle) * radius - ItemSize / 2f;
-                    _wheel.Add(MakeItem(entries[i], i, x, y));
+                    _wheel.Add(MakeItem(entries[idx], idx, x, y, ItemSize));
                 }
             }
 
@@ -216,11 +244,11 @@ namespace SprayMod
         // Add-link is handled by the settings UI's Sprays tab now (opened via the ADD LINK button's
         // _onAddLink callback), so there's a single place to manage links.
 
-        private VisualElement MakeItem(SprayLibraryEntry entry, int index, float x, float y)
+        private VisualElement MakeItem(SprayLibraryEntry entry, int index, float x, float y, float size)
         {
             var item = new VisualElement { name = $"SprayItem_{index}" };
             Absolute(item, x, y);
-            item.style.width = ItemSize; item.style.height = ItemSize;
+            item.style.width = size; item.style.height = size;
             item.style.backgroundColor = ItemBg;
             Round(item, 12f);
             SetBorder(item, 2f, new Color(0, 0, 0, 0.5f));
@@ -310,6 +338,27 @@ namespace SprayMod
             l.style.unityFontStyleAndWeight = bold ? FontStyle.Bold : FontStyle.Normal;
             l.style.unityTextAlign = TextAnchor.MiddleCenter;
             return l;
+        }
+
+        /// <summary>Compact square page-flip arrow ("&lt;" / "&gt;") shown beside the centre hub.</summary>
+        private VisualElement MakeArrowButton(string label, Action onClick)
+        {
+            var b = new Button(() => onClick?.Invoke()) { text = label };
+            b.style.width = 44;
+            b.style.height = 56;
+            b.style.paddingLeft = 0; b.style.paddingRight = 0;
+            b.style.paddingTop = 0; b.style.paddingBottom = 0;
+            b.style.marginLeft = 0; b.style.marginRight = 0;
+            b.style.backgroundColor = CenterBg;
+            b.style.color = TextCol;
+            b.style.unityFontStyleAndWeight = FontStyle.Bold;
+            b.style.unityTextAlign = TextAnchor.MiddleCenter;
+            b.style.fontSize = 22;
+            Round(b, 10f);
+            SetBorder(b, 2f, Accent);
+            b.RegisterCallback<MouseEnterEvent>(_ => b.style.backgroundColor = ItemHover);
+            b.RegisterCallback<MouseLeaveEvent>(_ => b.style.backgroundColor = CenterBg);
+            return b;
         }
 
         private VisualElement MakeButton(string label, Action onClick)

@@ -361,7 +361,7 @@ namespace SprayMod
                 _panel.style.flexDirection = UITK.FlexDirection.Column;
                 _panel.style.backgroundColor = new UITK.StyleColor(PanelBg);
                 _panel.style.paddingLeft = 8; _panel.style.paddingRight = 8;
-                _panel.style.paddingTop = 8; _panel.style.paddingBottom = 12;
+                _panel.style.paddingTop = 8; _panel.style.paddingBottom = 8;
                 _panel.style.display = UITK.DisplayStyle.None;
                 _panel.pickingMode = UITK.PickingMode.Position;
                 _panel.RegisterCallback<UITK.PointerUpEvent>(e => e.StopPropagation());
@@ -369,28 +369,36 @@ namespace SprayMod
                 // Title
                 var title = new UITK.Label("SPRAYS");
                 title.style.fontSize = 50;
-                title.style.marginBottom = 8;
+                title.style.marginBottom = 16;
                 MakeReadable(title);
                 _panel.Add(title);
                 
                 // Tab bar
                 _tabBar = new UITK.VisualElement();
                 _tabBar.style.flexDirection = UITK.FlexDirection.Row;
-                _tabBar.style.marginBottom = 26;
+                _tabBar.style.marginBottom = 8;
                 _tabBar.style.height = 50;
                 
                 _tabGeneral = MakeTabButton("GENERAL", true, () => SwitchToTab(SprayTab.General));
                 _tabSprays = MakeTabButton("SPRAYS", false, () => SwitchToTab(SprayTab.Sprays));
                 _tabBinds = MakeTabButton("KEYBINDS", false, () => SwitchToTab(SprayTab.Binds));
+                // Last tab keeps no right margin so KEYBINDS sits flush with the
+                // right edge the same way GENERAL hugs the left.
+                _tabBinds.style.marginRight = 0;
                 
                 _tabBar.Add(_tabGeneral);
                 _tabBar.Add(_tabSprays);
                 _tabBar.Add(_tabBinds);
                 _panel.Add(_tabBar);
                 
-                // Scroll view
+                // Scroll view. A flex item's default min-height is its content
+                // size, so a long list would keep the scroll view tall and push
+                // the footer past the panel's clipped bottom; pin min-height to
+                // 0 so the list shrinks and the footer stays in.
                 _scrollView = new UITK.ScrollView();
                 _scrollView.style.flexGrow = 1;
+                _scrollView.style.flexShrink = 1;
+                _scrollView.style.minHeight = 0;
                 _scrollView.verticalScrollerVisibility = ScrollerVisibility.Auto;
                 _scrollView.horizontalScrollerVisibility = ScrollerVisibility.Hidden;
                 // Keep content clear of the vertical scrollbar so nothing is clipped on the right.
@@ -402,8 +410,8 @@ namespace SprayMod
             var buttonRow = new UITK.VisualElement();
             buttonRow.style.flexDirection = UITK.FlexDirection.Row;
             buttonRow.style.justifyContent = UITK.Justify.SpaceBetween;
-            buttonRow.style.alignItems = UITK.Align.Center;
             buttonRow.style.marginTop = 8;
+            buttonRow.style.flexShrink = 0;   // footer keeps its size; the list shrinks instead
 
             var donateBtn = MakeDonateButton("COFFEE?", () => Application.OpenURL("https://buymeacoffee.com/amikiir"));
             var resetBtn = MakeResetButton("RESET TO DEFAULTS", ResetToDefaults);
@@ -416,7 +424,6 @@ namespace SprayMod
             // Right-hand group keeps RESET and CLOSE hugging each other on the right.
             var rightGroup = new UITK.VisualElement();
             rightGroup.style.flexDirection = UITK.FlexDirection.Row;
-            rightGroup.style.alignItems = UITK.Align.Center;
             rightGroup.Add(resetBtn);
             rightGroup.Add(closeBtn);
 
@@ -965,7 +972,9 @@ namespace SprayMod
             btn.style.paddingLeft = 8;
             btn.style.paddingRight = 8;
             btn.style.marginRight = 8;
-            btn.style.marginBottom = 26;
+            // Spacing below the tab strip is owned by tabBar.marginBottom; the
+            // button keeps no bottom margin of its own.
+            btn.style.marginBottom = 0;
             btn.style.fontSize = 24;
             btn.style.unityTextAlign = new UITK.StyleEnum<TextAnchor>(TextAnchor.MiddleCenter);
             btn.style.borderTopLeftRadius = 6;
@@ -1003,28 +1012,49 @@ namespace SprayMod
             row.style.flexDirection = FlexDirection.Row;
             row.style.justifyContent = Justify.SpaceBetween;
             row.style.alignItems = Align.Center;
+            row.style.height = 50;
             row.style.backgroundColor = new StyleColor(RowBg);
             row.style.paddingLeft = 12;
             row.style.paddingRight = 12;
-            row.style.paddingTop = 10;
-            row.style.paddingBottom = 10;
-            row.style.marginBottom = 6;
-            
+            row.style.marginBottom = 8;
+
             var lbl = new UITK.Label(label.ToUpperInvariant());
             lbl.style.fontSize = 24;
             MakeReadable(lbl);
             row.Add(lbl);
-            
+
             var toggle = new UITK.Toggle();
             toggle.value = initialValue;
+            StyleConfigCheckbox(toggle);
             toggle.RegisterValueChangedCallback(e => onChanged(e.newValue));
             row.Add(toggle);
-            
+
             _scrollView.Add(row);
+        }
+
+        // PlayerQoL toggle look: recolor the checkbox frame to a dark fill with
+        // a medium-gray border so it reads clearly against the dark rows.
+        // Applied on AttachToPanel because the inner ".unity-toggle__input"
+        // element only exists once the toggle is parented.
+        private static void StyleConfigCheckbox(UITK.Toggle toggle)
+        {
+            if (toggle == null) return;
+            toggle.RegisterCallback<UITK.AttachToPanelEvent>(_ =>
+            {
+                var input = toggle.Q(className: "unity-toggle__input");
+                if (input == null) return;
+                input.style.backgroundColor   = new StyleColor(new Color(0.15f, 0.15f, 0.15f));
+                input.style.borderTopColor    = new StyleColor(new Color(0.4f, 0.4f, 0.4f));
+                input.style.borderBottomColor = new StyleColor(new Color(0.4f, 0.4f, 0.4f));
+                input.style.borderLeftColor   = new StyleColor(new Color(0.4f, 0.4f, 0.4f));
+                input.style.borderRightColor  = new StyleColor(new Color(0.4f, 0.4f, 0.4f));
+            });
         }
         
         private void AddSliderRow(string label, float initialValue, float min, float max, Action<float> onChanged)
         {
+            // PlayerQoL slider row layout: fixed-width label, then the editable
+            // value field, then the slider filling the rest of the row.
             var row = new UITK.VisualElement();
             row.style.flexDirection = FlexDirection.Row;
             row.style.alignItems = Align.Center;
@@ -1033,42 +1063,39 @@ namespace SprayMod
             row.style.backgroundColor = new StyleColor(RowBg);
             row.style.paddingLeft = 12;
             row.style.paddingRight = 12;
-            row.style.paddingTop = 8;
-            row.style.paddingBottom = 8;
-            row.style.marginBottom = 6;
-            
+            row.style.marginBottom = 8;
+
             var lbl = new UITK.Label(label.ToUpperInvariant());
             lbl.style.fontSize = 24;
             lbl.style.whiteSpace = WhiteSpace.NoWrap;
-            lbl.style.minWidth = 220;
-            lbl.style.maxWidth = 220;
+            lbl.style.minWidth = 300;
+            lbl.style.maxWidth = 300;
             MakeReadable(lbl);
             row.Add(lbl);
-            
-            // Spacer
-            var spacer = new UITK.VisualElement();
-            spacer.style.flexGrow = 1;
-            row.Add(spacer);
-            
-            // Slider
-            var slider = new UITK.Slider(min, max);
-            slider.value = initialValue;
-            slider.style.width = 300;
-            slider.style.height = 20;
-            slider.style.marginLeft = 8;
-            slider.style.marginRight = 8;
-            StyleSlider(slider);
-            row.Add(slider);
-            
+
             // Text field for value
             var valueField = new UITK.TextField();
             valueField.value = initialValue.ToString("F2");
-            valueField.style.width = 60;
+            valueField.style.minWidth = 65;
+            valueField.style.maxWidth = 65;
+            valueField.style.maxHeight = 30;
             valueField.style.unityTextAlign = TextAnchor.MiddleRight;
+            valueField.style.marginLeft = 8;
+            valueField.style.marginRight = 8;
             valueField.style.backgroundColor = new StyleColor(TextFieldBg);
             valueField.style.color = Color.white;
             ForceUIFont(valueField);
             row.Add(valueField);
+
+            // Slider
+            var slider = new UITK.Slider(min, max);
+            slider.value = Mathf.Clamp(initialValue, min, max);
+            slider.style.flexGrow = 1;
+            slider.style.flexBasis = 0;
+            slider.style.marginLeft = 6;
+            slider.style.marginRight = 6;
+            StyleSlider(slider);
+            row.Add(slider);
             
             // Two-way binding
             slider.RegisterValueChangedCallback(e =>
@@ -1102,7 +1129,7 @@ namespace SprayMod
             row.style.paddingRight = 10;
             row.style.paddingTop = 8;
             row.style.paddingBottom = 8;
-            row.style.marginBottom = 6;
+            row.style.marginBottom = 8;
             
             // Label
             var lbl = new UITK.Label(label.ToUpperInvariant());
@@ -1192,7 +1219,7 @@ namespace SprayMod
             row.style.paddingRight = 10;
             row.style.paddingTop = 4;
             row.style.paddingBottom = 4;
-            row.style.marginBottom = 6;
+            row.style.marginBottom = 8;
 
             // Thumbnail
             var thumbnail = CreateThumbnailFromTexture(thumbnailTex, 40);
@@ -1606,30 +1633,28 @@ namespace SprayMod
             return btn;
         }
         
+        // PlayerQoL footer buttons: no bottom margins of their own - the 8px
+        // gap under the row comes from the panel's bottom padding.
         private UITK.Button MakeDonateButton(string t, Action onClick)
         {
             var b = new UITK.Button(onClick) { text = t.ToUpperInvariant() };
             b.style.unityTextAlign = new UITK.StyleEnum<TextAnchor>(TextAnchor.MiddleCenter);
             b.style.height = 50;
-            b.style.marginTop = 8;
-            b.style.marginBottom = 8;
             b.style.paddingLeft = 18; b.style.paddingRight = 18;
-            b.style.backgroundColor = new UITK.StyleColor(ButtonBg);
+            b.style.backgroundColor = new UITK.StyleColor(RowBg);
             MakeReadable(b);
             AddButtonFlash(b);
             return b;
         }
-        
+
         private UITK.Button MakeResetButton(string t, Action onClick)
         {
             var b = new UITK.Button(onClick) { text = t.ToUpperInvariant() };
             b.style.unityTextAlign = new UITK.StyleEnum<TextAnchor>(TextAnchor.MiddleCenter);
             b.style.height = 50;
-            b.style.marginTop = 8;
-            b.style.marginBottom = 8;
-            b.style.marginLeft = 6; b.style.marginRight = 6;
+            b.style.marginLeft = 8;
             b.style.paddingLeft = 18; b.style.paddingRight = 18;
-            b.style.backgroundColor = new UITK.StyleColor(ButtonBg);
+            b.style.backgroundColor = new UITK.StyleColor(RowBg);
             MakeReadable(b);
             AddButtonFlash(b);
             return b;
@@ -1640,10 +1665,9 @@ namespace SprayMod
             var b = new UITK.Button(onClick) { text = t.ToUpperInvariant() };
             b.style.unityTextAlign = new UITK.StyleEnum<TextAnchor>(TextAnchor.MiddleCenter);
             b.style.height = 50;
-            b.style.marginTop = 8;
-            b.style.marginBottom = 8;
-            b.style.paddingLeft = 18; b.style.paddingRight = 18;
-            b.style.backgroundColor = new UITK.StyleColor(ButtonBg);
+            b.style.marginLeft = 8;
+            b.style.paddingLeft = 18; b.style.paddingRight = 182;
+            b.style.backgroundColor = new UITK.StyleColor(RowBg);
             MakeReadable(b);
             AddButtonFlash(b);
             return b;
@@ -1723,19 +1747,27 @@ namespace SprayMod
             ForceUIFont(b);
         }
         
-        private static void StyleSlider(UITK.Slider slider)
+        // PlayerQoL slider look: thin translucent white rail with a large round
+        // white thumb.
+        private static void StyleSlider(UITK.Slider s)
         {
-            slider.style.height = 26;
-            slider.style.marginLeft = 6;
-            slider.style.marginRight = 6;
-            
-            var tracker = slider.Q<VisualElement>(className: "unity-slider__tracker");
-            var dragger = slider.Q<VisualElement>(className: "unity-slider__dragger");
+            s.style.height = 26;
+            s.style.marginLeft = 6;
+            s.style.marginRight = 6;
+
+            // Cover legacy, current, and base-slider USS class names - Unity
+            // renames these between versions and only one will match per build.
+            var tracker = s.Q<VisualElement>(className: "unity-base-slider__tracker")
+                       ?? s.Q<VisualElement>(className: "unity-slider__tracker")
+                       ?? s.Q<VisualElement>(className: "unity-tracker");
+            var dragger = s.Q<VisualElement>(className: "unity-base-slider__dragger")
+                       ?? s.Q<VisualElement>(className: "unity-slider__dragger")
+                       ?? s.Q<VisualElement>(className: "unity-dragger");
             if (tracker != null)
             {
                 tracker.style.height = 4;
-                tracker.style.marginTop = 11;
-                tracker.style.backgroundColor = new StyleColor(new Color(1, 1, 1, 0.15f));
+                tracker.style.marginTop = 11; // vertically center the 4px rail in 26px
+                tracker.style.backgroundColor = new StyleColor(new Color(1f, 1f, 1f, 0.35f));
                 tracker.style.borderTopLeftRadius = 2;
                 tracker.style.borderTopRightRadius = 2;
                 tracker.style.borderBottomLeftRadius = 2;
@@ -1745,7 +1777,7 @@ namespace SprayMod
             {
                 dragger.style.width = 18;
                 dragger.style.height = 18;
-                dragger.style.marginTop = 4;
+                dragger.style.marginTop = 4; // center on the rail
                 dragger.style.backgroundColor = new StyleColor(Color.white);
                 dragger.style.borderTopLeftRadius = 9;
                 dragger.style.borderTopRightRadius = 9;
