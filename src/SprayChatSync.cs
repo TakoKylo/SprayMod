@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Text;
 using HarmonyLib;
 using Unity.Netcode;
 using UnityEngine;
@@ -8,17 +9,22 @@ namespace SprayMod
 {
     /// <summary>
     /// Peer-to-peer spray sync over the game's chat channel. A placed spray is broadcast
-    /// as a tiny hidden chat message; every client receives it in ChatManager.AddChatMessage,
-    /// where the receive patch decodes it, hides it from the chat UI, and renders the spray.
+    /// as a chat message; every client receives it in ChatManager.AddChatMessage, where the
+    /// receive patch decodes it, hides it from the chat UI, and renders the spray.
     /// No server-side mod is required - vanilla servers relay chat for us.
     ///
-    /// Wire format (v2), kept under the server's 128-char cap and never starting with '/':
+    /// The message is INVISIBLE to players without the mod: the wire string is encoded with
+    /// Unicode Tag characters (see EncodeInvisible), which survive the network and the server's
+    /// trim, but a vanilla client's chat display strips them to an empty string and hides the
+    /// whole line. Players WITH the mod read the raw Content before any filtering and decode it.
+    ///
+    /// Decoded wire format (v2), kept under the server's 128-char cap and never starting with '/':
     ///   "!SX2:" + Base64(placement[10]) + typeChar + payload
     ///     placement = posXYZ(int16 cm) + normalXYZ(sbyte) + scale(byte)   (10 bytes -> 16 b64)
     ///     typeChar  = 'u' (payload is a URL, downloaded by every client) or
     ///                 'h' (payload is a 16-hex content hash, matched against the local library)
-    /// URL sprays are visible to everyone even if they don't own the file; hash sprays fall
-    /// back to a placeholder when the receiver doesn't have that image.
+    /// URL sprays are visible to everyone running the mod even if they don't own the file; hash
+    /// sprays fall back to a placeholder when the receiver doesn't have that image.
     /// See spraymod-b897-architecture.
     /// </summary>
     public class SprayChatSync : MonoBehaviour
@@ -63,9 +69,14 @@ namespace SprayMod
             try
             {
                 if (string.IsNullOrEmpty(content)) return;
-                if (content.Length > 128)
+
+                // Cloak the wire as invisible Unicode so players WITHOUT the mod never see it
+                // (their chat display strips it to nothing and hides the line). Mod clients read
+                // the raw Content before that filtering, so they still decode it.
+                string wire = EncodeInvisible(content);
+                if (wire.Length > 128)
                 {
-                    SprayUtilities.DebugLog($"Spray sync message too long ({content.Length} chars); not sent");
+                    SprayUtilities.DebugLog($"Spray sync message too long ({wire.Length} chars); not sent");
                     return;
                 }
                 if (NetworkManager.Singleton == null || !NetworkManager.Singleton.IsConnectedClient) return;
@@ -73,9 +84,9 @@ namespace SprayMod
                 if (cm == null) return;
 
                 PurgeRecent();
-                _recentSent[content] = Time.unscaledTime;
+                _recentSent[wire] = Time.unscaledTime;
 
-                cm.Client_SendChatMessage(content, false, false);
+                cm.Client_SendChatMessage(wire, false, false);
             }
             catch (Exception e)
             {
@@ -95,7 +106,10 @@ namespace SprayMod
                 if (!string.IsNullOrEmpty(senderSteamId) && senderSteamId == SprayManager.GetLocalSteamId())
                     return;
 
-                if (!TryDecode(content, out bool isUrl, out string reference, out Vector3 pos, out Vector3 normal, out float scale, out Vector3 up))
+                // New clients send the wire invisibly-encoded; tolerate legacy raw-marker messages too.
+                string decoded = IsInvisibleSpray(content) ? DecodeInvisible(content) : content;
+
+                if (!TryDecode(decoded, out bool isUrl, out string reference, out Vector3 pos, out Vector3 normal, out float scale, out Vector3 up))
                     return;
 
                 SprayManager.Instance?.RemoteSpray(senderSteamId ?? string.Empty, isUrl, reference, pos, normal, scale, up);
@@ -124,11 +138,55 @@ namespace SprayMod
             return MARKER + b64 + type + payload;
         }
 
-        /// <summary>True if a URL spray message would fit within the server's 128-char chat cap.</summary>
+        /// <summary>True if a URL spray message would fit within the server's 128-char chat cap.
+        /// Each ASCII char of the wire becomes one 2-unit invisible character, so the budget halves.</summary>
         public static bool UrlFitsInChat(string url)
         {
             if (string.IsNullOrEmpty(url)) return false;
-            return MARKER.Length + B64_LEN + 1 + url.Length <= 128;
+            return (MARKER.Length + B64_LEN + 1 + url.Length) * 2 <= 128;
+        }
+
+        // ---- invisible transport ----
+        // Each printable-ASCII byte of the wire maps to a Unicode TAG character (U+E0000 + c). Tag
+        // characters are Format-category code points: they survive the network (UTF-16) and the
+        // server's Trim, but a vanilla client's chat display runs FilterStringSpecialCharacters,
+        // which strips Format characters - leaving an empty string, so UIChat hides the whole line
+        // (DisplayStyle.None). Mod clients read the raw Content in the receive patch BEFORE any of
+        // that filtering, so they decode it normally.
+        private const int TagBase = 0xE0000;
+        private const char TagHighSurrogate = '\uDB40'; // shared high surrogate of U+E0000..U+E03FF
+
+        /// <summary>Encodes a printable-ASCII wire string as invisible Unicode Tag characters.</summary>
+        public static string EncodeInvisible(string ascii)
+        {
+            if (string.IsNullOrEmpty(ascii)) return ascii;
+            var sb = new StringBuilder(ascii.Length * 2);
+            foreach (char c in ascii)
+                if (c >= 0x20 && c <= 0x7E) sb.Append(char.ConvertFromUtf32(TagBase + c));
+            return sb.ToString();
+        }
+
+        /// <summary>Inverse of EncodeInvisible: pulls the ASCII back out of the Tag characters.</summary>
+        public static string DecodeInvisible(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return s;
+            var sb = new StringBuilder(s.Length / 2);
+            for (int i = 0; i < s.Length; i++)
+            {
+                if (char.IsHighSurrogate(s[i]) && i + 1 < s.Length && char.IsLowSurrogate(s[i + 1]))
+                {
+                    int cp = char.ConvertToUtf32(s[i], s[++i]);
+                    if (cp >= TagBase + 0x20 && cp <= TagBase + 0x7E) sb.Append((char)(cp - TagBase));
+                }
+            }
+            return sb.ToString();
+        }
+
+        /// <summary>Fast check: does this message carry an invisibly-encoded spray marker?</summary>
+        public static bool IsInvisibleSpray(string content)
+        {
+            if (string.IsNullOrEmpty(content) || content.IndexOf(TagHighSurrogate) < 0) return false;
+            return DecodeInvisible(content).IndexOf(MARKER, StringComparison.Ordinal) >= 0;
         }
 
         public static bool TryDecode(string content, out bool isUrl, out string reference, out Vector3 pos, out Vector3 normal, out float scale, out Vector3 up)
@@ -238,9 +296,10 @@ namespace SprayMod
             {
                 if (chatMessage == null) return true;
                 string content = chatMessage.Content.ToString();
-                // Match the marker ANYWHERE - some servers colour-wrap/prefix chat, so it isn't
-                // always at the start (that was leaking spray messages into chat on those servers).
-                if (string.IsNullOrEmpty(content) || content.IndexOf(SprayChatSync.MARKER, StringComparison.Ordinal) < 0)
+                // Ours if it carries the invisibly-encoded marker (new clients) or the raw marker
+                // ANYWHERE (legacy clients / servers that colour-wrap or prefix chat).
+                if (string.IsNullOrEmpty(content) ||
+                    (!SprayChatSync.IsInvisibleSpray(content) && content.IndexOf(SprayChatSync.MARKER, StringComparison.Ordinal) < 0))
                     return true; // normal message - let it through
 
                 string steamId = chatMessage.SteamID.HasValue ? chatMessage.SteamID.Value.ToString() : string.Empty;

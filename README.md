@@ -112,26 +112,28 @@ Players can configure their spray experience via `config/spray_client_config.jso
 
 ## How It Works
 
-### Client-Side Mode
-When server spray sharing is **disabled**, sprays work like this:
-1. Player uses `/spray` command
-2. Spray images load from local `Sprays/SprayImages/` folder
-3. Player places spray on a surface
-4. Spray is **only visible to that player**
+SprayMod is **fully client-side** — there is no server component and no server-side mod is
+required. It works on any vanilla server because sprays are shared peer-to-peer over the game's
+own chat channel.
 
-### Server-Side Mode
-When server spray sharing is **enabled**, sprays work like this:
-1. Player uses `/spray` command and selects a spray
-2. Client sends spray request to server with position and texture index
-3. Server validates the request (cooldown, limits, etc.)
-4. Server broadcasts spray placement to **all connected players**
-5. All players see the spray using their local texture (or default if not available)
+### Placing a spray
+1. Open the spray wheel (default `Z`, or `/spray`) and click a spray
+2. The spray is placed on the surface you're looking at (a screen-space decal that conforms to
+   the geometry, or the classic flat quad if you toggle Flat Sprays)
+3. If sharing is enabled, the placement is broadcast to everyone else running the mod
 
-### Network Synchronization
-- Uses Unity Netcode ServerRpc and ClientRpc for reliable spray synchronization
-- Server authoritative: Server validates and approves all spray placements
-- Client prediction: Local player sees spray immediately while server processes
-- Texture sharing: Sprays reference texture indices, not raw image data (efficient)
+### Peer-to-peer sync (over chat)
+- A placement is encoded into a tiny message — `Base64(position + normal + scale + roll)` plus
+  either a short image URL or a content hash — and sent as a chat message
+  (see [SprayChatSync.cs](src/SprayChatSync.cs))
+- Every client receives it in `ChatManager.AddChatMessage`; clients **with** the mod read the raw
+  content first, decode it, hide it from the chat UI, and render the spray
+- The message is **invisible to players without the mod**: it's encoded with Unicode Tag
+  characters, which a vanilla client's chat display strips to nothing and hides entirely — so
+  non-mod players never see chat spam
+- Image sprays are auto-hosted to a short link so everyone can fetch them; hash sprays fall back
+  to a placeholder for receivers who don't already have that image
+- Orientation (roll around the surface normal) is synced, so a spray looks the same for everyone
 
 ## Folder Structure
 
