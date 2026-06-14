@@ -14,7 +14,7 @@ namespace SprayMod
     /// No server-side mod is required - vanilla servers relay chat for us.
     ///
     /// The message is INVISIBLE to players without the mod: the wire string is encoded with
-    /// Unicode Tag characters (see EncodeInvisible), which survive the network and the server's
+    /// C0 control characters (see EncodeInvisible), which survive the network and the server's
     /// trim, but a vanilla client's chat display strips them to an empty string and hides the
     /// whole line. Players WITH the mod read the raw Content before any filtering and decode it.
     ///
@@ -139,7 +139,7 @@ namespace SprayMod
         }
 
         /// <summary>True if a URL spray message would fit within the server's 128-char chat cap.
-        /// Each ASCII char of the wire becomes one 2-unit invisible character, so the budget halves.</summary>
+        /// Each ASCII char of the wire becomes two control characters, so the budget halves.</summary>
         public static bool UrlFitsInChat(string url)
         {
             if (string.IsNullOrEmpty(url)) return false;
@@ -147,45 +147,82 @@ namespace SprayMod
         }
 
         // ---- invisible transport ----
-        // Each printable-ASCII byte of the wire maps to a Unicode TAG character (U+E0000 + c). Tag
-        // characters are Format-category code points: they survive the network (UTF-16) and the
-        // server's Trim, but a vanilla client's chat display runs FilterStringSpecialCharacters,
-        // which strips Format characters - leaving an empty string, so UIChat hides the whole line
-        // (DisplayStyle.None). Mod clients read the raw Content in the receive patch BEFORE any of
-        // that filtering, so they decode it normally.
-        private const int TagBase = 0xE0000;
-        private const char TagHighSurrogate = '\uDB40'; // shared high surrogate of U+E0000..U+E03FF
+        // Each ASCII byte of the wire is written as two C0 CONTROL characters (base-16; high nibble then
+        // low nibble). Control characters are stripped by the vanilla chat display
+        // (FilterStringSpecialCharacters keeps only letters/digits/whitespace/punctuation/symbols, and
+        // "Control" is none of those), so a client WITHOUT the mod collapses the message to an empty
+        // string and hides the whole chat line (DisplayStyle.None). Even a client that doesn't run that
+        // filter typically skips control codes rather than drawing a glyph for them. Mod clients read
+        // the raw Content in the receive patch BEFORE any filtering and decode here.
+        // (Earlier tries used invisible Unicode - supplementary Tag chars, then BMP zero-width chars -
+        // but both rendered as boxes on non-mod clients: that client keeps them and the font has no
+        // glyph. Control chars are an unambiguous stripped category and aren't drawn, so no boxes.)
+        // Alphabet = the non-whitespace controls 0x01-0x08 and 0x0E-0x15 (NUL and tab/LF/VT/FF/CR are
+        // avoided - NUL terminates, the rest are whitespace the server's Trim would eat).
+        private static readonly int[] NibCp =
+        {
+            0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+            0x0E, 0x0F, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15
+        };
+        // Built from ints so the source file stays plain ASCII (no invisible characters embedded).
+        private static readonly char[] Nib = BuildNib();
+        private static char[] BuildNib()
+        {
+            var a = new char[NibCp.Length];
+            for (int i = 0; i < a.Length; i++) a[i] = (char)NibCp[i];
+            return a;
+        }
 
-        /// <summary>Encodes a printable-ASCII wire string as invisible Unicode Tag characters.</summary>
+        /// <summary>Encodes a printable-ASCII wire string as control characters (base-16).</summary>
         public static string EncodeInvisible(string ascii)
         {
             if (string.IsNullOrEmpty(ascii)) return ascii;
             var sb = new StringBuilder(ascii.Length * 2);
-            foreach (char c in ascii)
-                if (c >= 0x20 && c <= 0x7E) sb.Append(char.ConvertFromUtf32(TagBase + c));
+            foreach (char ch in ascii)
+            {
+                byte b = (byte)ch;
+                sb.Append(Nib[(b >> 4) & 0x0F]);
+                sb.Append(Nib[b & 0x0F]);
+            }
             return sb.ToString();
         }
 
-        /// <summary>Inverse of EncodeInvisible: pulls the ASCII back out of the Tag characters.</summary>
+        /// <summary>Inverse of EncodeInvisible: pulls the ASCII back out of the control characters.</summary>
         public static string DecodeInvisible(string s)
         {
             if (string.IsNullOrEmpty(s)) return s;
             var sb = new StringBuilder(s.Length / 2);
-            for (int i = 0; i < s.Length; i++)
+            int hi = -1;
+            foreach (char c in s)
             {
-                if (char.IsHighSurrogate(s[i]) && i + 1 < s.Length && char.IsLowSurrogate(s[i + 1]))
-                {
-                    int cp = char.ConvertToUtf32(s[i], s[++i]);
-                    if (cp >= TagBase + 0x20 && cp <= TagBase + 0x7E) sb.Append((char)(cp - TagBase));
-                }
+                int v = NibIndex(c);
+                if (v < 0) continue;            // skip anything that isn't part of our alphabet
+                if (hi < 0) hi = v;
+                else { sb.Append((char)((hi << 4) | v)); hi = -1; }
             }
             return sb.ToString();
+        }
+
+        private static int NibIndex(char c)
+        {
+            for (int i = 0; i < Nib.Length; i++) if (Nib[i] == c) return i;
+            return -1;
         }
 
         /// <summary>Fast check: does this message carry an invisibly-encoded spray marker?</summary>
         public static bool IsInvisibleSpray(string content)
         {
-            if (string.IsNullOrEmpty(content) || content.IndexOf(TagHighSurrogate) < 0) return false;
+            if (string.IsNullOrEmpty(content)) return false;
+            // Quick reject: our wire is made entirely of C0 control characters, which essentially never
+            // appear in normal chat, so a message containing none of our alphabet is never ours.
+            bool maybe = false;
+            foreach (char c in content)
+            {
+                int cp = c;
+                if ((cp >= 0x01 && cp <= 0x08) || (cp >= 0x0E && cp <= 0x15))
+                { maybe = true; break; }
+            }
+            if (!maybe) return false;
             return DecodeInvisible(content).IndexOf(MARKER, StringComparison.Ordinal) >= 0;
         }
 

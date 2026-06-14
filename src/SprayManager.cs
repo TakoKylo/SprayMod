@@ -30,7 +30,6 @@ namespace SprayMod
         private float lastLocalSprayTime = -999f;
 
         private Transform sprayContainer;
-        private AudioSource sprayAudioSource;
         private AudioClip spraySound;
         private Texture2D placeholderTexture;
 
@@ -59,11 +58,6 @@ namespace SprayMod
             var container = new GameObject("SprayContainer");
             sprayContainer = container.transform;
             DontDestroyOnLoad(container);
-
-            sprayAudioSource = container.AddComponent<AudioSource>();
-            sprayAudioSource.playOnAwake = false;
-            sprayAudioSource.spatialBlend = 0f;
-            sprayAudioSource.volume = 0.5f;
 
             LoadSpraySound();
             placeholderTexture = CreatePlaceholderTexture();
@@ -795,8 +789,7 @@ namespace SprayMod
             else
                 spray.Initialize(data, texture, lifetime);
 
-            if ((clientConfig == null || clientConfig.EnableSound) && spraySound != null && sprayAudioSource != null)
-                sprayAudioSource.PlayOneShot(spraySound);
+            PlaySpraySoundAt(position);
 
             string key = steamId ?? string.Empty;
             if (!playerSprays.TryGetValue(key, out var list))
@@ -898,6 +891,36 @@ namespace SprayMod
         }
 
         // ---- spray sound ----
+
+        /// <summary>
+        /// Plays the spray sound as a positional 3D one-shot AT the spray location, so it's
+        /// proximity-based (loud up close, inaudible across the rink) instead of a flat 2D sound
+        /// that everyone hears at the same volume regardless of distance.
+        /// </summary>
+        private void PlaySpraySoundAt(Vector3 position)
+        {
+            if (spraySound == null) return;
+            if (clientConfig != null && !clientConfig.EnableSound) return;
+            try
+            {
+                var go = new GameObject("SpraySound");
+                go.transform.position = position;
+                var src = go.AddComponent<AudioSource>();
+                src.clip = spraySound;
+                src.spatialBlend = 1f;                       // fully 3D / positional
+                src.rolloffMode = AudioRolloffMode.Linear;
+                src.minDistance = 3f;                        // full volume within 3m
+                src.maxDistance = 45f;                       // ~rink length; silent beyond
+                src.dopplerLevel = 0f;
+                src.volume = 0.6f;
+                src.Play();
+                Destroy(go, spraySound.length + 0.2f);
+            }
+            catch (Exception e)
+            {
+                SprayUtilities.DebugLog($"Spray sound failed: {e.Message}");
+            }
+        }
 
         private void LoadSpraySound()
         {
